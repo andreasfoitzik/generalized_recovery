@@ -43,8 +43,8 @@ data_rnd['moneyness']       = (data_rnd['implStrike'] / data_rnd['underlyingforw
 data_rnd['maturity']        = data_rnd['daystomaturity'] / 365
 
 # ------------------- Get Data ----------------
-days_to_maturity            = np.array(data_rnd['daystomaturity'].unique())
-maturities                  = np.array(data_rnd['maturity'].unique())
+days_to_maturity            = np.sort(np.array(data_rnd['daystomaturity'].unique()))
+maturities                  = np.sort(np.array(data_rnd['maturity'].unique()))
 
 # ---------------- Variable Declaration ----------------
 teta                        = np.zeros(11)
@@ -59,11 +59,9 @@ cmap = plt.cm.get_cmap("hsv", 12)
 #====================================================
 #
 
-# ---------------- For each 5 min in .csv ----------------
+# ---------------- For each given day ----------------
 
 for date in data_rnd['loctimestamp'].unique():
-
-
 
     # ---------------- State-Spaces ----------------
     variances            = np.array(data_rnd['bakshiVariance'].unique())
@@ -83,29 +81,14 @@ for date in data_rnd['loctimestamp'].unique():
     print("\n")
 
     # ---------------- Arrow-Debreu-Prices ----------------
-    data = pd.DataFrame(columns=['moneyness', 22,  50,  85, 113, 204, 295,   7,  30,  60,  91, 182, 365])
-    data[:, "moneyness"] = data_rnd.loc[(data_rnd['maturity'] == maturities[0]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data1 = data_rnd.loc[(data_rnd['maturity'] == maturities[0]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data2 = data_rnd.loc[(data_rnd['maturity'] == maturities[1]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data3 = data_rnd.loc[(data_rnd['maturity'] == maturities[2]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data4 = data_rnd.loc[(data_rnd['maturity'] == maturities[3]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data5 = data_rnd.loc[(data_rnd['maturity'] == maturities[4]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data6 = data_rnd.loc[(data_rnd['maturity'] == maturities[5]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data7 = data_rnd.loc[(data_rnd['maturity'] == maturities[6]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data8 = data_rnd.loc[(data_rnd['maturity'] == maturities[7]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data9 = data_rnd.loc[(data_rnd['maturity'] == maturities[8]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data10 = data_rnd.loc[(data_rnd['maturity'] == maturities[9]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data11 = data_rnd.loc[(data_rnd['maturity'] == maturities[10]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-    data12 = data_rnd.loc[(data_rnd['maturity'] == maturities[11]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
+    data = pd.DataFrame(columns=['moneyness', 22,  50,  85, 113, 204, 295, 7, 30, 60, 91, 182, 365])
+    data.loc[:, 'moneyness'] = data_rnd.loc[(data_rnd['daystomaturity'] == days_to_maturity[0]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State)]['moneyness'].values
 
-    data = pd.merge(data1, data2, on='moneyness')
+    for day in days_to_maturity:
+        x = data_rnd.loc[(data_rnd['daystomaturity'] == day) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
+        data.loc[:, day] = pd.merge(data, x, on='moneyness')['ad']
 
-    data.columns.values[1] = days_to_maturity[0]
-    for a in range(1, len(maturities)):
-        x = data_rnd.loc[(data_rnd['maturity'] == maturities[a]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-        data = pd.merge(data, x, on='moneyness')
-        data.columns.values[a + 1] = days_to_maturity[a]
-
+    data    = data.fillna(0)
     states  = np.array(data['moneyness'].unique())
     pi      = np.zeros((len(maturities), len(states)))
 
@@ -241,17 +224,15 @@ for date in data_rnd['loctimestamp'].unique():
     for i in range (0, len(maturities)):
         x0_seed.append(rf_seed)
 
-    additional      = {'PI': pi, 'B': B, 'alpha': alpha, 'beta': beta}
-
-    def objective (x0, args):
+    def objective (x0):
         x1 = x0[0:len(teta)]
         x2 = x0[len(teta):amount_of_bounds]
 
-        x = -1 *((args['PI'].dot(args['B'])).dot(x1)) - (args['alpha'] + args['beta'].dot(x2))
+        x = (-1) *((pi.dot(B)).dot(x1)) - (alpha + beta.dot(x2))
 
         return np.sum(x)
 
-    res         = minimize(objective, x0_seed, additional, method='SLSQP', bounds=bnds, constraints=constraints)
+    res         = minimize(objective, x0_seed, method='SLSQP', bounds=bnds, constraints=constraints)
 
     teta        = res.x[0:len(teta)]
     delta_min   = res.x[len(teta):amount_of_bounds]
@@ -269,13 +250,12 @@ for date in data_rnd['loctimestamp'].unique():
     plt.xlabel('States')
     plt.ylabel('Inverse PRICING-KERNEL')
 
-    #TODO - fix PRICING-KERNEL
-    # Plot PRICING-KERNEL TETA
     plt.figure('PRICING-KERNEL')
     plt.suptitle('PRICING-KERNEL')
     plt.plot(states, (1/inv_pricing_kernel), color='r')
     for i in range (0, len(state_space)):
         plt.axvline(x=state_space[i,0], color='b')
+
     plt.axvline(x=state_space[len(state_space)-1, 1], color='b')
     plt.legend()
     plt.xlabel('States')
@@ -415,42 +395,4 @@ for date in data_rnd['loctimestamp'].unique():
     for i in range(0, len(maturities)):
         expectations.loc[len(expectations.index)] = [days_to_maturity[i], date, exp_r[i], vol[i], skewness[i], kurtosis[i]]
 
-#
-# =========================================================================
-#                           Autoregression
-# =========================================================================
-#
-'''
-print("\n")
-print("--- Expectations ---")
-print(expectations)
-print("--------------------")
-print("\n")
-
-# ---------------- Calculate 30-days Excess-Returns ----------------
-moneyness = data_rnd.loc[data_rnd['daystomaturity'] == days_to_maturity[0]]['moneyness']
-data_rnd.set_index('loctimestamp')
-
-test = data_rnd.copy()
-test['loctimestamp'] = pd.to_datetime(test['loctimestamp'])
-test.index = test['loctimestamp']
-test['loctimestamp'].shift(30, freq='D')
-
-#data_rnd.index = pd.to_datetime('loctimestamp')
-#df1 = data_rnd.shift(-1, freq = "D")
-data_rnd['loctimestamp']
-data_rnd['loctimestamp'].shift(30, freq='D')
-
-#((Preis_t) / (Preis_t-30)) – (riskfree_rate_t-30 annualisiert auf 30 tage).
-
-# calculate returns wihtin a 5 min intervall
-# data within a 15 sec intervall
-
-# ---------------- Calculate Returns ----------------
-
-
-
-moneyness = data_rnd.loc[data_rnd['daystomaturity'] == days_to_maturity[0]]['moneyness']
-returns = (moneyness / moneyness.shift(1)) - 1
-'''
 plt.show()

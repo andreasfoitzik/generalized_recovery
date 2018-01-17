@@ -228,9 +228,9 @@ for index, date in enumerate(dates):
         x1 = x0[0:len(teta)]
         x2 = x0[len(teta):amount_of_bounds]
 
-        x = ((pi.dot(B)).dot(x1)) - (alpha + beta.dot(x2))
+        x = (-1) *((pi.dot(B)).dot(x1)) - (alpha + beta.dot(x2))
 
-        return - np.sum(x)
+        return np.sum(x)
 
     res         = minimize(objective, x0_seed, method='SLSQP', bounds=bnds, constraints=constraints)
 
@@ -239,7 +239,6 @@ for index, date in enumerate(dates):
 
     inv_pricing_kernel = B.dot(teta)
 
-    # TODO - include initial level of the inverse pricing kernel
     if plot:
         plt.figure('Inverse PRICING-KERNEL')
         plt.suptitle('Inverse PRICING-KERNEL')
@@ -252,7 +251,6 @@ for index, date in enumerate(dates):
         plt.xlabel('States')
         plt.ylabel('Inverse PRICING-KERNEL')
 
-    #TODO - include pricing kernel
     if plot:
         plt.figure('PRICING-KERNEL')
         plt.suptitle('PRICING-KERNEL')
@@ -354,12 +352,11 @@ for index, date in enumerate(dates):
         plt.ylabel('Skewness')
 
     # ---------------- conditional Kurtosis ----------------
-    kurtosis = np.zeros(P.shape[0])
-    for i in range (0, P.shape[0]):
-        x = 0
-        for a in range(0, P.shape[1]):
-            x += (P[i,a] - exp_r[i]) ** 4
-        kurtosis[i] = x / P.shape[1]
+    kurtosis = np.empty(P.shape[0])
+    for i in range(0, P.shape[0]):
+        num = 1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 4)
+        den = (1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 2)) ** 2
+        kurtosis[i] = num / den
 
     if plot:
         plt.figure('Conditional Kurtosis')
@@ -489,7 +486,6 @@ for day in days_to_maturity_all:
     X = np.array(monthly_real_excess_return[day])[0:len(monthly_real_excess_return)-1]
     X = sm.add_constant(X)
 
-    print()
     model   = sm.OLS(Y, X)
     results = model.fit()
     print("AR(1)- Modell for maturity: ", day, ' -> a0 = ', results.params[0], " and a1 = ", results.params[0])
