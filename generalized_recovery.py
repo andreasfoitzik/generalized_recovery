@@ -11,14 +11,16 @@
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 
-from scipy.optimize import minimize
-
-import scipy.integrate as integrate
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
+
+import scipy.stats as stats
+import scipy.integrate as integrate
+
+from scipy.interpolate import interp1d
+from scipy.optimize import minimize
 
 #
 #====================================================
@@ -26,32 +28,41 @@ matplotlib.style.use('ggplot')
 #====================================================
 #
 
+# ---------------- variable declarations ----------------
+MATURITY_365                = 365
+TETAS_AMOUNT                = 11
+STATE_SPACES_AMOUNT         = 10
+
+teta                        = np.zeros(TETAS_AMOUNT)
+expectations                = pd.DataFrame(columns=['daystomaturity', 'loctimestamp', 'exp_r', 'exp_vol', 'exp_skew', 'exp_kurt'])
+
 # ---------------- Load Data ----------------
 data_qvar_rf                = pd.read_csv("data/eurostoxx50_qvar_riskfree_all.csv", sep = ';')
 data_rnd                    = pd.read_csv("data/eurostoxx50_rnd.csv",  sep = ';')
 
 # ---------------- Reduce Data ----------------
-data_rnd                    = data_rnd.loc[data_rnd['daystomaturity'] <= 365]
+# only use options with maturity less than 365 days for stability
+data_rnd                    = data_rnd.loc[data_rnd['daystomaturity'] <= MATURITY_365]
 
 # ---------------- Prepare Data ----------------
 data_rnd['loctimestamp']    = pd.to_datetime(data_rnd['loctimestamp'], format = '%Y-%m-%d')
 data_rnd                    = pd.merge(data_rnd, data_qvar_rf[['daystomaturity', 'riskfree', 'bakshiVariance']], on = 'daystomaturity')
 
 # ---------------- Calculate Data ----------------
-data_rnd['ad']              = data_rnd['rndStrike'] * np.exp(-data_rnd['riskfree'] * data_rnd['daystomaturity'] / 365)
+data_rnd['ad']              = data_rnd['rndStrike'] * np.exp(-data_rnd['riskfree'] * data_rnd['daystomaturity'] / MATURITY_365)
 data_rnd['moneyness']       = (data_rnd['implStrike'] / data_rnd['underlyingforwardprice']).round(decimals = 3)
-data_rnd['maturity']        = data_rnd['daystomaturity'] / 365
+data_rnd['maturity']        = data_rnd['daystomaturity'] / MATURITY_365
 
 # ------------------- Get Data ----------------
+# use days_to_maturity for visualization
 days_to_maturity            = np.sort(np.array(data_rnd['daystomaturity'].unique()))
+# use annualized maturities for calculus
 maturities                  = np.sort(np.array(data_rnd['maturity'].unique()))
 
-# ---------------- Variable Declaration ----------------
-teta                        = np.zeros(11)
-expectations                = pd.DataFrame(columns=['daystomaturity', 'loctimestamp', 'exp_r', 'exp_vol', 'exp_skew', 'exp_kurt'])
+# ------------------- TXT-Format -------------------
 txt_days_to_maturity        = "Days to maturity"
-
-cmap = plt.cm.get_cmap("hsv", 12)
+SEPERATOR                   = "--------------------------------------------------------"
+cmap                        = plt.cm.get_cmap("hsv", 12)
 
 #
 #====================================================
@@ -66,37 +77,47 @@ for date in data_rnd['loctimestamp'].unique():
     # ---------------- State-Spaces ----------------
     variances            = np.array(data_rnd['bakshiVariance'].unique())
     variances            = np.sort(variances)
-    current_VIX          = np.sqrt(variances[0] * (365/30))
+    # get biggest variance, to get the biggest state space
+    current_VIX          = np.sqrt(variances[-1] * (MATURITY_365/30))
 
     # as state we use the current return, which is 1
-    lowest_State         = 1 - 2.5 * current_VIX
-    highest_State        = 1 + 4 * current_VIX
+    lowest_State         = 1 - 0.25 * current_VIX
+    highest_State        = 1 + 0.4 * current_VIX
 
     print("\n")
     print("------------ DATA SETUP ------------")
     print("Current VIX:     ", current_VIX)
     print("Lowest State:    ", lowest_State)
     print("Highest State:   ", highest_State)
-    print("------------------------------------")
-    print("\n")
+    print(SEPERATOR)
 
     # ---------------- Arrow-Debreu-Prices ----------------
-    data = pd.DataFrame(columns=['moneyness', 22,  50,  85, 113, 204, 295, 7, 30, 60, 91, 182, 365])
-    data.loc[:, 'moneyness'] = data_rnd.loc[(data_rnd['daystomaturity'] == days_to_maturity[0]) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State)]['moneyness'].values
+    # collect all states
+    data = pd.DataFrame()
+    for maturity in maturities:
+        data = pd.concat([data, data_rnd.loc[(data_rnd['maturity'] == maturity) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State)]['moneyness']])
 
-    for day in days_to_maturity:
-        x = data_rnd.loc[(data_rnd['daystomaturity'] == day) & (data_rnd['moneyness'] >= lowest_State) & (data_rnd['moneyness'] <= highest_State), ['moneyness', 'ad']]
-        data.loc[:, day] = pd.merge(data, x, on='moneyness')['ad']
+    states = np.sort(np.array(data[0].unique()))
 
-    data    = data.fillna(0)
-    states  = np.array(data['moneyness'].unique())
-    pi      = np.zeros((len(maturities), len(states)))
+    # get Arrow-Debreu prices of all to define state price matrix
+    pi = np.zeros((len(maturities), len(states)))
+    for index in range(0, len(maturities)):
+        y       = data_rnd.loc[(data_rnd['maturity'] == maturities[index])]['ad'].values
+        x       = data_rnd.loc[(data_rnd['maturity'] == maturities[index])]['moneyness'].values
+        values  = data_rnd.loc[(data_rnd['maturity'] == maturities[index])]
 
-    for b in range(0, len(maturities)):
-        pi[b] = data.iloc[:, (b + 1)].values
+        for state in range(0, len(states)):
+            ad = values[data_rnd['moneyness'] == states[state]]['ad'].values
+            if ad:
+                pi[index, state] = ad[0]
+            elif index > 0 and state + 1 < len(states):
+                # interpolate results of all non defined states
+                f = interp1d(x, y)
+                pi[index, state] = f(states[state])
+                print("Interpolate for ", pi[index, state])
 
-    plt.figure('ARROW-DEBREU-PRICES')
-    plt.suptitle('ARROW-DEBREU-PRICES')
+    plt.figure('RISK NEUTRAL DENSITY')
+    plt.suptitle('RISK NEUTRAL DENSITY')
     for i in range(0, pi.shape[0]):
         plt.plot(states, pi[i, :], label='Days to maturity %s'%(days_to_maturity[i]), color=cmap(i))
 
@@ -108,7 +129,7 @@ for date in data_rnd['loctimestamp'].unique():
     print("Arrow-Debreu-Price Matrix")
     print("Amount of States:            ", len(states))
     print("Amount of Maturities:        ", len(maturities))
-    print("-----------------------------------------------------")
+    print(SEPERATOR)
 
     # ---------------- Discount-Factor Closed-Form Recovery ----------------
     alpha                       = np.zeros(len(maturities))
@@ -122,28 +143,35 @@ for date in data_rnd['loctimestamp'].unique():
         beta[i]         = maturities[i] * (delta_zero ** (maturities[i] - 1))
         delta[i]        = alpha[i] + beta[i] * delta_zero
 
+    print("\n")
     print("------------- DISCOUNT-FACTOR CLOSED-FORM-RECOVERY -------------")
     print("Discount-factor approximation:")
-    print("Alpha:   ", alpha)
-    print("Beta:    ", beta)
-    print("Delta:   ", delta)
-    print("------------------------------------------------")
+    print("Alpha:   ")
+    print(alpha)
+    print(alpha.shape)
+    print("Beta:    ")
+    print(beta)
+    print(beta.shape)
+    print("Delta:   ")
+    print(delta)
+    print(delta.shape)
+    print(SEPERATOR)
 
     # ---------------- 10 State-Spaces ----------------
     state_spaces       = []
-    state_space        = np.zeros((10, 2))
+    state_space        = np.zeros((STATE_SPACES_AMOUNT, 2))
 
-    state_space[0, 0]               = 1 - 2.5 * current_VIX
-    state_space[0, 1]               = 1 - 2 * current_VIX
+    state_space[0, 0]               = 1 - 0.25 * current_VIX
+    state_space[0, 1]               = 1 - 0.2 * current_VIX
     state_spaces.append(np.matrix(states[(states >= state_space[0, 0]) & (states < state_space[0, 1])]))
 
-    state_space_equal_portion_from  = 1 - 2 * current_VIX
-    state_space_equal_portion_to    = 1 + 2 * current_VIX
+    state_space_equal_portion_from  = 1 - 0.2 * current_VIX
+    state_space_equal_portion_to    = 1 + 0.2 * current_VIX
     portion                         = (state_space_equal_portion_to - state_space_equal_portion_from) / 8
 
     print("\n")
-    print("--- STATE SPACE --- ")
-    print("0 FROM ", state_space[0, 0], " TO ", state_space[0, 1])
+    print("--------------- STATE SPACE --------------- ")
+    print("0  FROM ", state_space[0, 0], " TO ", state_space[0, 1])
 
     for i in range (1, 9):
         state_space[i, 0]           = state_space[i-1, 1]
@@ -151,16 +179,16 @@ for date in data_rnd['loctimestamp'].unique():
         state_spaces.append(np.matrix(states[(states >= state_space[i, 0]) & (states < state_space[i, 1])]))
         print(i, " FROM ", state_space[i, 0], " TO ", state_space[i, 1])
 
-    state_space[9, 0]               = 1 + 2 * current_VIX
-    state_space[9, 1]               = 1 + 4 * current_VIX
+    state_space[9, 0]               = 1 + 0.2 * current_VIX
+    state_space[9, 1]               = 1 + 0.4 * current_VIX
     state_spaces.append(np.matrix(states[(states >= state_space[9, 0]) & (states < state_space[9, 1])]))
 
-    print("9 FROM ", state_space[9, 0], " TO ", state_space[9, 1])
-    print("--------------------")
-    print("\n")
+    print("9  FROM ", state_space[9, 0], " TO ", state_space[9, 1])
+    print(SEPERATOR)
 
     # ---------------- Design-Matrix B ----------------
     B                       = np.zeros((len(states), len(teta)))
+    # counting the rank of the matrix
     amount_of_states_set    = 0
 
     # Design Matrix Level
@@ -169,7 +197,7 @@ for date in data_rnd['loctimestamp'].unique():
 
     # Design Matrix State Space 1
     for i in range (0, state_spaces[0].shape[1]):
-        B[i, 1]     = (i+1) / state_spaces[0].shape[1]
+        B[i, 1]     = (i) / state_spaces[0].shape[1]
 
     amount_of_states_set   += state_spaces[0].shape[1]
     for i in range (amount_of_states_set, len(states)):
@@ -182,7 +210,7 @@ for date in data_rnd['loctimestamp'].unique():
         counter = 0
         amount_of_states_putting = (amount_of_states_set + state_spaces[a].shape[1])
         for i in range (amount_of_states_set, amount_of_states_putting):
-            counter    += 1
+            counter      += 1
             B[i, a+1]     = counter / state_spaces[a].shape[1]
         amount_of_states_set += state_spaces[a].shape[1]
         for i in range (amount_of_states_putting, len(states)):
@@ -198,52 +226,55 @@ for date in data_rnd['loctimestamp'].unique():
     plt.ylabel('Column')
 
     print("\n")
-    print("--- DESIGN-MATRIX B ---")
-    print("Design-Matrix B - DATA:  ", B)
-    print("Design-Matrix B - SHAPE: ", B.shape)
-    print("-----------------------")
-    print("\n")
+    print("--------------- DESIGN-MATRIX B ---------------")
+    print("Design-Matrix B - DATA:  ")
+    print(B)
+    print("Design-Matrix B - SHAPE: ")
+    print(B.shape)
+    print(SEPERATOR)
 
     # ---------------- Minimization-Problem ----------------
-    amount_of_bounds = (len(teta) + len(maturities))
+    # boundaries
     b1              = (0, None)
     b2              = (0, 1.0)
-    bnds            = [b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1]
+    bnds            = [b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b2]
 
-    for i in range (len(teta), amount_of_bounds):
-        bnds.append(b2)
-
-    con             = {'type':'ineq', 'fun': lambda x: x > 0}
-    constraints     = (con)
-
-    teta_seed       = 0.1
+    teta_seed       = 1
     rf_seed         = np.sum(delta) / len(delta)
 
-    x0_seed         = [teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed]
-
-    for i in range (0, len(maturities)):
-        x0_seed.append(rf_seed)
+    x0_seed = [teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, rf_seed]
 
     def objective (x0):
         x1 = x0[0:len(teta)]
-        x2 = x0[len(teta):amount_of_bounds]
+        x2 = x0[len(teta):len(teta)+1]
 
-        x = (-1) *((pi.dot(B)).dot(x1)) - (alpha + beta.dot(x2))
+        x = pi.dot(B).dot(x1) - (alpha + beta*x2)
 
-        return np.sum(x)
+        return np.linalg.norm(x)
 
-    res         = minimize(objective, x0_seed, method='SLSQP', bounds=bnds, constraints=constraints)
+    res         = minimize(objective, x0_seed, method='L-BFGS-B', bounds=bnds)
 
     teta        = res.x[0:len(teta)]
-    delta_min   = res.x[len(teta):amount_of_bounds]
+    delta_min   = res.x[len(teta):len(teta)+1]
 
+    print("\n")
+    print("--- MINIMIZATION PROBLEM ---")
+    print("TETA - Data:     ")
+    print(teta)
+    print(teta.shape)
+    print("DELTA - Data:    ")
+    print(delta_min)
+    print(delta_min.shape)
+    print(SEPERATOR)
+
+    # ---------------- Pricing-Kernel ----------------
     inv_pricing_kernel = B.dot(teta)
 
-    plt.figure('Inverse PRICING-KERNEL')
-    plt.suptitle('Inverse PRICING-KERNEL')
+    plt.figure('INVERSE PRICING-KERNEL')
+    plt.suptitle('INVERSE PRICING-KERNEL')
     plt.plot(states, inv_pricing_kernel, color='r')
     for i in range (0, len(state_space)):
-        plt.axvline(x=state_space[i,0], color='b')
+        plt.axvline(x=state_space[i,1], color='b')
 
     plt.axvline(x=state_space[len(state_space)-1, 1], color='b')
     plt.legend()
@@ -254,33 +285,28 @@ for date in data_rnd['loctimestamp'].unique():
     plt.suptitle('PRICING-KERNEL')
     plt.plot(states, (1/inv_pricing_kernel), color='r')
     for i in range (0, len(state_space)):
-        plt.axvline(x=state_space[i,0], color='b')
+        plt.axvline(x=state_space[i,1], color='b')
 
     plt.axvline(x=state_space[len(state_space)-1, 1], color='b')
     plt.legend()
     plt.xlabel('States')
     plt.ylabel('PRICING-KERNEL')
 
-    print("\n")
-    print("--- MINIMIZATION PROBLEM ---")
-    print("TETA - Data:     " , teta)
-    print("#TETA:           " , len(teta))
-    print("DELTA - Data:    " , delta_min)
-    print("#DELTA:          " , len(delta_min))
-    print("----------------------------")
-    print("\n")
-
     # ---------------- Physical Probabilities ----------------
-    delta_diag          = np.diag(delta_min)
+    deltas = np.matrix([delta_min ** 1, delta_min ** 2, delta_min ** 3, delta_min ** 4, delta_min ** 5,
+                                        delta_min ** 6, delta_min ** 7, delta_min ** 8, delta_min ** 9, delta_min ** 10,
+                                        delta_min ** 11, delta_min ** 12])
+
+    delta_diag          = np.diagflat(deltas)
     delta_diag_invers   = np.linalg.inv(delta_diag)
 
     P_init              = delta_diag_invers.dot(pi).dot(np.diag( B.dot(teta)))
 
     # normalize P to have row sums of one
-    P = P_init / P_init.sum(axis=1)[:, None]
+    P = np.asarray(P_init / P_init.sum(axis=1))
 
     plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
-    plt.suptitle('PHYSICAL PROBABILITY DISTRIBUTION')
+    plt.subplot(211).set_title('PHYSICAL PROBABILITY DISTRIBUTION')
     for i in range(0, P.shape[0]):
         plt.plot(states, P[i], label='Days to maturity %s'%(days_to_maturity[i]), color=cmap(i))
 
@@ -290,10 +316,10 @@ for date in data_rnd['loctimestamp'].unique():
 
     print("\n")
     print("--- MULTI-PERIOD PHYSICAL PROBABILITIES ---")
+    print("Multi-Period physical probabilities    - Data: ")
+    print(P)
     print("Multi-Period physical probabilities    - Shape:", P.shape)
-    print("Multi-Period physical probabilities    - Data: ", P)
-    print("-------------------------------------------")
-    print("\n")
+    print(SEPERATOR)
 
     #
     # =========================================================================
@@ -301,13 +327,24 @@ for date in data_rnd['loctimestamp'].unique():
     # =========================================================================
     #
 
-    # ---------------- conditional Phy. Exp. for next day ----------------
-    exp_r = np.empty(P.shape[0])
-    for i in range (0, P.shape[0]):
-        exp_r[i] = integrate.trapz(np.array(P[i, :]).tolist(), states, 0.01)
+    # calculating moments under P-density
+    exp_r   = np.zeros(len(P))
+    exp_r_2 = np.zeros(len(P))
+    exp_r_3 = np.zeros(len(P))
+    exp_r_4 = np.zeros(len(P))
 
-    plt.figure('Conditional Physical Expectation ')
-    plt.suptitle('Conditional Physical Expectation')
+    for i in range (0, len(P)):
+        p_list      = np.array(P[i, :]).tolist()
+        exp_r[i]    = integrate.trapz(p_list, states, 0.01)
+        exp_r_2[i]  = integrate.trapz(np.power(p_list, 2), states, 0.01)
+        exp_r_3[i]  = integrate.trapz(np.power(p_list, 3), states, 0.01)
+        exp_r_4[i]  = integrate.trapz(np.power(p_list, 4), states, 0.01)
+
+    print("\n")
+    print("--- Conditional expected moments under P-DENSITY ---")
+
+    # ---------------- conditional Phy. Exp. for next day ----------------
+    plt.subplot(212)
     for i in range(0, len(exp_r)):
         plt.plot(days_to_maturity[i], exp_r[i]*100, 'ro', color=cmap(i), label="Days to Maturity %s"%(days_to_maturity[i]))
 
@@ -315,46 +352,31 @@ for date in data_rnd['loctimestamp'].unique():
     plt.xlabel(txt_days_to_maturity)
     plt.ylabel('Expected Return in %')
 
-    print("\n")
-    print("--- Time t physical expectation of one month returns ---")
-    print("Expected Return    - Data:  ", exp_r)
-    print("Expected Return    - Shape: ", exp_r.shape)
-    print("--------------------------------------------------------")
-    print("\n")
+    print("Expected Return    - Data:  \n", exp_r)
+    print(SEPERATOR)
 
-    # ---------------- conditional volatility ----------------
-    exp_r_2 = np.empty(P.shape[0])
-    for i in range (0, P.shape[0]):
-        exp_r_2[i] = integrate.trapz(np.power(np.array(P[i, :]).tolist(), 2), states, 0.01)
-
+    # ---------------- conditional Volatility ----------------
     var = exp_r_2 - np.power(exp_r, 2)
     vol = np.sqrt(var)
 
-    plt.figure('Conditional Volatility')
-    plt.suptitle('Conditional Volatility')
+    plt.figure('CONDITIONAL EXPECTATIONS')
+    plt.subplot(311).set_title('EXPECTED VOLATILITY')
     for i in range(0, len(vol)):
         plt.plot(days_to_maturity[i], vol[i], 'ro', color=cmap(i), label='Days to maturity %s'%(days_to_maturity[i]))
 
     plt.legend(days_to_maturity)
     plt.xlabel(txt_days_to_maturity)
-    plt.ylabel('Conditional Volatility')
+    plt.ylabel('Volatility')
 
-    print("\n")
-    print("--- One month conditional volatility ---")
-    print("Volatility    - Data:  ", vol)
-    print("Volatility    - Shape: ", vol.shape)
-    print("----------------------------------------")
-    print("\n")
+    print("Expected Volatility    - Data:  \n", vol)
+    print(SEPERATOR)
 
     # ---------------- conditional Skewness ----------------
-    exp_r_3 = np.empty(P.shape[0])
-    for i in range (0, P.shape[0]):
-        exp_r_3[i] = integrate.trapz(np.power(np.array(P[i, :]).tolist(), 3), states, 0.01)
+    skewness = np.zeros(len(P))
+    for i in range(0, len(P)):
+        skewness[i] = stats.skew(P[i])
 
-    skewness = (exp_r_3 - (3 * exp_r.dot(exp_r_2)) + 2 * np.power(exp_r, 3)) / np.power((exp_r_2 - np.power(exp_r, 2)), 3/2)
-
-    plt.figure('Conditional Skewness')
-    plt.suptitle('Conditional Skewness')
+    plt.subplot(312).set_title('EXPECTED SKEWNESS')
     for i in range(0, len(skewness)):
         plt.plot(days_to_maturity[i], skewness[i], 'ro', color=cmap(i), label='Days to maturity %s'%(days_to_maturity[i]))
 
@@ -362,22 +384,15 @@ for date in data_rnd['loctimestamp'].unique():
     plt.xlabel(txt_days_to_maturity)
     plt.ylabel('Skewness')
 
-    print("\n")
-    print("--- Skewness ---")
-    print("Skewness    - Data:  ", skewness)
-    print("----------------------------------------")
-    print("\n")
+    print("Expected Skewness    - Data:  \n", skewness)
+    print(SEPERATOR)
 
     # ---------------- conditional Kurtosis ----------------
-    kurtosis = np.zeros(P.shape[0])
+    kurtosis = np.zeros(len(P))
+    for i in range(0, len(P)):
+        kurtosis[i] = stats.kurtosis(P[i])
 
-    for i in range(0, P.shape[0]):
-        num = 1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 4)
-        den = (1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 2)) ** 2
-        kurtosis[i] = num / den
-
-    plt.figure('Conditional Kurtosis')
-    plt.suptitle('Conditional Kurtosis')
+    plt.subplot(313).set_title('EXPECTED KURTOSIS')
     for i in range(0, len(kurtosis)):
         plt.plot(days_to_maturity[i], kurtosis[i], 'ro', color=cmap(i), label='Days to maturity %s'%(days_to_maturity[i]))
 
@@ -385,14 +400,17 @@ for date in data_rnd['loctimestamp'].unique():
     plt.xlabel(txt_days_to_maturity)
     plt.ylabel('Kurtosis')
 
-    print("\n")
-    print("--- Kurtosis ---")
-    print("Kurtosis    - Data:  ", kurtosis)
-    print("----------------------------------------")
-    print("\n")
+    print("Expected Kurtosis    - Data:  \n", kurtosis)
+    print(SEPERATOR)
 
     # ---------------- Expected values ----------------
     for i in range(0, len(maturities)):
         expectations.loc[len(expectations.index)] = [days_to_maturity[i], date, exp_r[i], vol[i], skewness[i], kurtosis[i]]
 
 plt.show()
+
+print("\n")
+print("--- One month conditional Expectations ---")
+print("Expectations    - Data:  ", expectations)
+print(SEPERATOR)
+print("\n")
