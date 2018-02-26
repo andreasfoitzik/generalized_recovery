@@ -77,7 +77,7 @@ for date in data_rnd['loctimestamp'].unique():
     # ---------------- State-Spaces ----------------
     variances            = np.array(data_rnd['bakshiVariance'].unique())
     variances            = np.sort(variances)
-    # get biggest variance, to get the biggest state space
+    # get highest variance, for biggest state space
     current_VIX          = np.sqrt(variances[-1] * (MATURITY_365/30))
 
     # as state we use the current return, which is 1
@@ -327,7 +327,7 @@ for date in data_rnd['loctimestamp'].unique():
     # =========================================================================
     #
 
-    # calculating moments under P-density
+    # ---------------- calculating moments under P-density ----------------
     exp_r   = np.zeros(len(P))
     exp_r_2 = np.zeros(len(P))
     exp_r_3 = np.zeros(len(P))
