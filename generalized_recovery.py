@@ -16,7 +16,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
 
-import scipy.stats as stats
 import scipy.integrate as integrate
 
 from scipy.interpolate import interp1d
@@ -75,14 +74,13 @@ cmap                        = plt.cm.get_cmap("hsv", 12)
 for date in data_rnd['loctimestamp'].unique():
 
     # ---------------- State-Spaces ----------------
-    variances            = np.array(data_rnd['bakshiVariance'].unique())
-    variances            = np.sort(variances)
-    # get highest variance, for biggest state space
-    current_VIX          = np.sqrt(variances[-1] * (MATURITY_365/30))
+    # annualize current VIX based on maturity
+    # use VIX value for 30-day maturity, for simplicity
+    current_VIX          = data_qvar_rf.loc[(data_qvar_rf['daystomaturity'] == MATURITY_365)]['bakshiVariance'].values[0]
 
     # as state we use the current return, which is 1
-    lowest_State         = 1 - 0.25 * current_VIX
-    highest_State        = 1 + 0.4 * current_VIX
+    lowest_State         = 1 - 2.5 * current_VIX
+    highest_State        = 1 + 4 * current_VIX
 
     print("\n")
     print("------------ DATA SETUP ------------")
@@ -110,7 +108,7 @@ for date in data_rnd['loctimestamp'].unique():
             ad = values[data_rnd['moneyness'] == states[state]]['ad'].values
             if ad:
                 pi[index, state] = ad[0]
-            elif index > 0 and state + 1 < len(states):
+            elif index > 0 and state + 1 < len(states) and values['moneyness'].iloc[0] < states[state] and values['moneyness'].iloc[-1] > states[state]:
                 # interpolate results of all non defined states
                 f = interp1d(x, y)
                 pi[index, state] = f(states[state])
@@ -161,12 +159,12 @@ for date in data_rnd['loctimestamp'].unique():
     state_spaces       = []
     state_space        = np.zeros((STATE_SPACES_AMOUNT, 2))
 
-    state_space[0, 0]               = 1 - 0.25 * current_VIX
-    state_space[0, 1]               = 1 - 0.2 * current_VIX
+    state_space[0, 0]               = 1 - 2.5 * current_VIX
+    state_space[0, 1]               = 1 - 2 * current_VIX
     state_spaces.append(np.matrix(states[(states >= state_space[0, 0]) & (states < state_space[0, 1])]))
 
-    state_space_equal_portion_from  = 1 - 0.2 * current_VIX
-    state_space_equal_portion_to    = 1 + 0.2 * current_VIX
+    state_space_equal_portion_from  = 1 - 2 * current_VIX
+    state_space_equal_portion_to    = 1 + 2 * current_VIX
     portion                         = (state_space_equal_portion_to - state_space_equal_portion_from) / 8
 
     print("\n")
@@ -179,8 +177,8 @@ for date in data_rnd['loctimestamp'].unique():
         state_spaces.append(np.matrix(states[(states >= state_space[i, 0]) & (states < state_space[i, 1])]))
         print(i, " FROM ", state_space[i, 0], " TO ", state_space[i, 1])
 
-    state_space[9, 0]               = 1 + 0.2 * current_VIX
-    state_space[9, 1]               = 1 + 0.4 * current_VIX
+    state_space[9, 0]               = 1 + 2 * current_VIX
+    state_space[9, 1]               = 1 + 4 * current_VIX
     state_spaces.append(np.matrix(states[(states >= state_space[9, 0]) & (states < state_space[9, 1])]))
 
     print("9  FROM ", state_space[9, 0], " TO ", state_space[9, 1])
@@ -239,10 +237,10 @@ for date in data_rnd['loctimestamp'].unique():
     b2              = (0, 1.0)
     bnds            = [b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b2]
 
-    teta_seed       = 1
+    teta_seed       = 0.5
     rf_seed         = np.sum(delta) / len(delta)
 
-    x0_seed = [teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, rf_seed]
+    x0_seed = [1,0.9,0.8,0.7,0.6,0.5,0.5,0.5,0.5,0.5,0.5,rf_seed]
 
     def objective (x0):
         x1 = x0[0:len(teta)]
@@ -281,9 +279,11 @@ for date in data_rnd['loctimestamp'].unique():
     plt.xlabel('States')
     plt.ylabel('Inverse PRICING-KERNEL')
 
+    pricing_kernel = (1/inv_pricing_kernel)
+
     plt.figure('PRICING-KERNEL')
     plt.suptitle('PRICING-KERNEL')
-    plt.plot(states, (1/inv_pricing_kernel), color='r')
+    plt.plot(states, pricing_kernel, color='r')
     for i in range (0, len(state_space)):
         plt.axvline(x=state_space[i,1], color='b')
 
@@ -294,16 +294,19 @@ for date in data_rnd['loctimestamp'].unique():
 
     # ---------------- Physical Probabilities ----------------
     deltas = np.matrix([delta_min ** 1, delta_min ** 2, delta_min ** 3, delta_min ** 4, delta_min ** 5,
-                                        delta_min ** 6, delta_min ** 7, delta_min ** 8, delta_min ** 9, delta_min ** 10,
-                                        delta_min ** 11, delta_min ** 12])
+                        delta_min ** 6, delta_min ** 7, delta_min ** 8, delta_min ** 9, delta_min ** 10,
+                        delta_min ** 11, delta_min ** 12])
 
     delta_diag          = np.diagflat(deltas)
     delta_diag_invers   = np.linalg.inv(delta_diag)
 
-    P_init              = delta_diag_invers.dot(pi).dot(np.diag( B.dot(teta)))
+    P_init              = delta_diag_invers.dot(pi).dot(np.diag(B.dot(teta)))
 
     # normalize P to have row sums of one
-    P = np.asarray(P_init / P_init.sum(axis=1))
+    kernel              = integrate.trapz(states * pricing_kernel, states)
+    P                   = np.asarray(P_init / kernel)
+
+    # TODO - normalize Kernel to have an expected value of 1/rf
 
     plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
     plt.subplot(211).set_title('PHYSICAL PROBABILITY DISTRIBUTION')
@@ -335,10 +338,10 @@ for date in data_rnd['loctimestamp'].unique():
 
     for i in range (0, len(P)):
         p_list      = np.array(P[i, :]).tolist()
-        exp_r[i]    = integrate.trapz(p_list, states, 0.01)
-        exp_r_2[i]  = integrate.trapz(np.power(p_list, 2), states, 0.01)
-        exp_r_3[i]  = integrate.trapz(np.power(p_list, 3), states, 0.01)
-        exp_r_4[i]  = integrate.trapz(np.power(p_list, 4), states, 0.01)
+        exp_r[i]    = integrate.trapz((states) * p_list, states)
+        exp_r_2[i]  = integrate.trapz((states**2) * p_list, states)
+        exp_r_3[i]  = integrate.trapz((states**3) * p_list, states)
+        exp_r_4[i]  = integrate.trapz((states**4) * p_list, states)
 
     print("\n")
     print("--- Conditional expected moments under P-DENSITY ---")
@@ -346,7 +349,7 @@ for date in data_rnd['loctimestamp'].unique():
     # ---------------- conditional Phy. Exp. for next day ----------------
     plt.subplot(212)
     for i in range(0, len(exp_r)):
-        plt.plot(days_to_maturity[i], exp_r[i]*100, 'ro', color=cmap(i), label="Days to Maturity %s"%(days_to_maturity[i]))
+        plt.plot(days_to_maturity[i], exp_r[i], 'ro', color=cmap(i), label="Days to Maturity %s"%(days_to_maturity[i]))
 
     plt.legend()
     plt.xlabel(txt_days_to_maturity)
@@ -372,9 +375,7 @@ for date in data_rnd['loctimestamp'].unique():
     print(SEPERATOR)
 
     # ---------------- conditional Skewness ----------------
-    skewness = np.zeros(len(P))
-    for i in range(0, len(P)):
-        skewness[i] = stats.skew(P[i])
+    skewness = (exp_r_3 - (3 * exp_r.dot(exp_r_2)) + 2 * np.power(exp_r, 3)) / np.power((exp_r_2 - np.power(exp_r, 2)), 3 / 2)
 
     plt.subplot(312).set_title('EXPECTED SKEWNESS')
     for i in range(0, len(skewness)):
@@ -389,8 +390,10 @@ for date in data_rnd['loctimestamp'].unique():
 
     # ---------------- conditional Kurtosis ----------------
     kurtosis = np.zeros(len(P))
-    for i in range(0, len(P)):
-        kurtosis[i] = stats.kurtosis(P[i])
+    for i in range(0, P.shape[0]):
+        num = 1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 4)
+        den = (1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 2)) ** 2
+        kurtosis[i] = num / den
 
     plt.subplot(313).set_title('EXPECTED KURTOSIS')
     for i in range(0, len(kurtosis)):
@@ -411,6 +414,7 @@ plt.show()
 
 print("\n")
 print("--- One month conditional Expectations ---")
-print("Expectations    - Data:  ", expectations)
+print("Expectations    - Data:  ")
+print(expectations)
 print(SEPERATOR)
 print("\n")

@@ -25,6 +25,9 @@ from scipy.interpolate import interp1d
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
+import statsmodels.api as sm
+from statsmodels.graphics.regressionplots import abline_plot
+
 
 #
 #====================================================
@@ -75,7 +78,7 @@ plot_final                      = True
 cmap                            = plt.cm.get_cmap("hsv", 12)
 
 dates                           = data_rnd_all['loctimestamp'].unique()
-dates                           = dates[2000:2050]
+dates                           = dates[2000:2200]
 
 #
 #====================================================
@@ -104,14 +107,12 @@ for index, date in enumerate(dates):
         continue
 
     # ---------------- State-Space ----------------
-    variances               = np.array(data_qvar['Q_variance'].unique())
-    variances               = np.sort(variances)
-    # get highest variance, for biggest state space
-    current_VIX             = np.sqrt(variances[1] * (MATURITY_365/30))
+    # get highest variance, for largest state space
+    current_VIX             = data_qvar.loc[(data_qvar['daystomaturity'] == 365)]['Q_variance'].values[0]
 
     # as state we use the current return, which is 1
-    lowest_State            = 1 - (0.25 * current_VIX)
-    highest_State           = 1 + (0.4 * current_VIX)
+    lowest_State            = 1 - (2.5 * current_VIX)
+    highest_State           = 1 + (4 * current_VIX)
 
     # ---------------- Arrow-Debreu-Prices ----------------
     # collect all states
@@ -164,12 +165,12 @@ for index, date in enumerate(dates):
     state_spaces = []
     state_space = np.zeros((STATE_SPACES_AMOUNT, 2))
 
-    state_space[0, 0] = 1 - 0.25 * current_VIX
-    state_space[0, 1] = 1 - 0.2 * current_VIX
+    state_space[0, 0] = 1 - 2.5 * current_VIX
+    state_space[0, 1] = 1 - 2 * current_VIX
     state_spaces.append(np.matrix(states[(states >= state_space[0, 0]) & (states < state_space[0, 1])]))
 
-    state_space_equal_portion_from = 1 - 0.2 * current_VIX
-    state_space_equal_portion_to = 1 + 0.2 * current_VIX
+    state_space_equal_portion_from = 1 - 2 * current_VIX
+    state_space_equal_portion_to = 1 + 2 * current_VIX
     portion = (state_space_equal_portion_to - state_space_equal_portion_from) / 8
 
     for i in range(1, 9):
@@ -177,8 +178,8 @@ for index, date in enumerate(dates):
         state_space[i, 1] = state_space[i, 0] + portion
         state_spaces.append(np.matrix(states[(states >= state_space[i, 0]) & (states < state_space[i, 1])]))
 
-    state_space[9, 0] = 1 + 0.2 * current_VIX
-    state_space[9, 1] = 1 + 0.4 * current_VIX
+    state_space[9, 0] = 1 + 2 * current_VIX
+    state_space[9, 1] = 1 + 4 * current_VIX
     state_spaces.append(np.matrix(states[(states >= state_space[9, 0]) & (states < state_space[9, 1])]))
 
     # ---------------- Design-Matrix B ----------------
@@ -230,7 +231,7 @@ for index, date in enumerate(dates):
     teta_seed = 1
     rf_seed = np.sum(delta) / len(delta)
 
-    x0_seed = [teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, teta_seed, rf_seed]
+    x0_seed = [1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.60, 0.55, 0.50, rf_seed]
 
     def objective(x0):
         x1 = x0[0:len(teta)]
@@ -261,10 +262,12 @@ for index, date in enumerate(dates):
         plt.xlabel('States')
         plt.ylabel('Inverse PRICING-KERNEL')
 
+    pricing_kernel = (1 / inv_pricing_kernel)
+
     if plot:
         plt.figure('PRICING-KERNEL')
         plt.suptitle('PRICING-KERNEL')
-        plt.plot(states, (1/inv_pricing_kernel), color='r')
+        plt.plot(states, pricing_kernel, color='r')
         for i in range(0, len(state_space)):
             plt.axvline(x=state_space[i, 0], color='b')
 
@@ -276,8 +279,6 @@ for index, date in enumerate(dates):
     # ---------------- Physical Probabilities ----------------
     delta_diag          = np.diagflat(np.matrix([delta_min**1,delta_min**2,delta_min**3,delta_min**4,delta_min**5,delta_min**6]))
 
-    # Singular matrix - if data is too poor it is possible that a singular matrix
-
     if np.linalg.det(delta_diag) != 0:
         delta_diag_invers   = np.linalg.inv(delta_diag)
     else:
@@ -286,7 +287,10 @@ for index, date in enumerate(dates):
     P_init              = delta_diag_invers.dot(pi).dot(np.diag( B.dot(teta)))
 
     # normalize P to have row sums of one
-    P = np.asarray(P_init / P_init.sum(axis=1))
+    kernel              = integrate.trapz(states * pricing_kernel, states)
+    P                   = np.asarray(P_init / kernel)
+
+    # TODO - normalize Kernel to have an expected value of 1/rf
 
     if plot:
         plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
@@ -311,17 +315,17 @@ for index, date in enumerate(dates):
     exp_r_4 = np.zeros(len(P))
 
     for i in range (0, len(P)):
-        p_list      = np.array(P[i, :]).tolist()
-        exp_r[i]    = integrate.trapz(p_list, states, 0.01)
-        exp_r_2[i]  = integrate.trapz(np.power(p_list, 2), states, 0.01)
-        exp_r_3[i]  = integrate.trapz(np.power(p_list, 3), states, 0.01)
-        exp_r_4[i]  = integrate.trapz(np.power(p_list, 4), states, 0.01)
+        p_list     = np.array(P[i, :]).tolist()
+        exp_r[i]   = integrate.trapz((states) * p_list, states)
+        exp_r_2[i] = integrate.trapz((states ** 2) * p_list, states)
+        exp_r_3[i] = integrate.trapz((states ** 3) * p_list, states)
+        exp_r_4[i] = integrate.trapz((states ** 4) * p_list, states)
 
     # ---------------- conditional Phy. Exp. for next day ----------------
     if plot:
         plt.subplot(212)
         for i in range(0, len(exp_r)):
-            plt.plot(days_to_maturity[i], exp_r[i]*100, 'ro', label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
+            plt.plot(days_to_maturity[i], exp_r[i], 'ro', label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
 
         plt.legend(days_to_maturity_all)
         plt.xlabel('Maturities')
@@ -342,9 +346,7 @@ for index, date in enumerate(dates):
         plt.ylabel('Expected Volatility')
 
     # ---------------- conditional Skewness ----------------
-    skewness = np.zeros(len(P))
-    for i in range(0, len(P)):
-        skewness[i] = stats.skew(P[i])
+    skewness = (exp_r_3 - (3 * exp_r.dot(exp_r_2)) + 2 * np.power(exp_r, 3)) / np.power((exp_r_2 - np.power(exp_r, 2)), 3 / 2)
 
     if plot:
         plt.subplot(312).set_title('EXPECTED SKEWNESS')
@@ -357,8 +359,10 @@ for index, date in enumerate(dates):
 
     # ---------------- conditional Kurtosis ----------------
     kurtosis = np.zeros(len(P))
-    for i in range(0, len(P)):
-        kurtosis[i] = stats.kurtosis(P[i])
+    for i in range(0, P.shape[0]):
+        num = 1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 4)
+        den = (1 / P.shape[1] * sum((P[i] - np.mean(P[i])) ** 2)) ** 2
+        kurtosis[i] = num / den
 
     if plot:
         plt.subplot(313).set_title('EXPECTED KURTOSIS')
@@ -379,31 +383,39 @@ for index, date in enumerate(dates):
 
 #
 # =========================================================================
+#                            Expectations
+# =========================================================================
+#
+
+plt.figure('EXPECTED RETURNS')
+plt.suptitle('EXPECTED RETURNS')
+for i in range(0, len(days_to_maturity)):
+    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_r'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
+
+plt.legend(days_to_maturity_all)
+plt.xlabel('Date')
+plt.ylabel('Return in %')
+
+#
+# =========================================================================
 #                           Calculate Results
 # =========================================================================
 #
 
 # ---------------- Calculate Conditional EXPECTED 30-days Excess-Returns ----------------
-# get risk free-rate for each maturity
 # get expected value for each maturity
 # merge both dataframes to calculate the excess return for the expected values in the past
+# TODO - annualize monthly return
 
 for day in days_to_maturity_all:
-    data_rf     = data_rf_all.loc[(data_rf_all['daystomaturity'] == day)].copy()
-    data        = expectations.loc[(expectations['daystomaturity'] == day), ['loctimestamp', 'exp_r']].copy()
+    data                        = expectations.loc[(expectations['daystomaturity'] == day), ['loctimestamp', 'exp_r']].copy()
+    data                        = data.set_index('loctimestamp')
 
-    data        = pd.merge(data, data_rf[['loctimestamp', 'riskfree']], on='loctimestamp')
-    data        = data.set_index('loctimestamp')
+    monthly_recovered_return    = data.resample('30D').last()
+    monthly_recovered_return['returns']    = monthly_recovered_return.pct_change()
 
-    monthly_exp_ex_r = data.resample('30D').last()
-    monthly_exp_ex_r = monthly_exp_ex_r.pct_change()
-    #TODO - annualize riskfree rate for each maturity
-    monthly_exp_ex_r['returns'] = monthly_exp_ex_r['exp_r'] - (monthly_exp_ex_r['riskfree'] * (MATURITY_365 / 30))
-
-    monthly_exp_excess_return[day]      = monthly_exp_ex_r['returns']
     average_exp_excess_return.append(np.mean(monthly_exp_excess_return[day]))
 
-    del data_rf
     del data
 
 # annualize averaged monthly expected returns
@@ -427,89 +439,20 @@ print("\n")
 
 #
 # =========================================================================
-#                           Innovation
+#                           REALIZED P-VALUES
 # =========================================================================
 #
 #
 
 # values calculated by P_moments_calculation.py
-es50_P_values_daily           = pd.read_csv("data/es50_P_values_daily.csv", sep = ';')
-es50_P_values_daily['Date']   = pd.to_datetime(es50_P_values_daily['loctimestamp'])
-es50_P_values_daily           = es50_P_values_daily.set_index('Date')
+es50_P_values_daily                     = pd.read_csv("data/es50_P_values_daily.csv", sep = ';')
+es50_P_values_daily['loctimestamp']     = pd.to_datetime(es50_P_values_daily['loctimestamp'])
 
-es50_P_values_30_days         = pd.read_csv("data/es50_P_values_30_days.csv", sep = ';')
-es50_P_values_30_days['Date'] = pd.to_datetime(es50_P_values_30_days['loctimestamp'])
-es50_P_values_30_days         = es50_P_values_30_days.set_index('Date')
+es50_P_values_30_days                   = pd.read_csv("data/es50_P_values_30_days.csv", sep = ';')
+es50_P_values_30_days['loctimestamp']   = pd.to_datetime(es50_P_values_30_days['loctimestamp'])
 
-np.mean(es50_P_values_daily['P_LN_Returns'])
-np.mean(es50_P_values_30_days['30_days_P_LN_Return'])
-
-# ---------------- Innovation Daily ----------------
-# daily innovation for: excess return, volatility, skewness, kurtosis
-# 30 day innovation for: TODO - ?
-
-innovation_daily              = pd.DataFrame(columns=['date', 'maturity', 'in_ex_return', 'in_volatility', 'in_skewness', 'in_kurtosis'])
-innovation_30_days            = pd.DataFrame(columns=['date', 'maturity', 'in_ex_return'])
-
-for index, expectation in expectations.iterrows():
-
-    realized_P_values   = es50_P_values_daily.loc[es50_P_values_daily.index == expectation['loctimestamp']]
-    date                = expectation['loctimestamp']
-    maturity            = expectation['daystomaturity']
-    in_ex_return        = realized_P_values['P_LN_Returns'].values[0] - expectation['exp_r']
-    in_volatility       = realized_P_values['P_variance'].values[0]   - expectation['exp_vol']
-    in_skewness         = realized_P_values['P_skewness'].values[0] -  expectation['exp_skew']
-    in_kurtosis         = realized_P_values['P_kurtosis'].values[0] - expectation['exp_kur']
-    innovation_daily.loc[len(innovation_daily)] = [date, maturity, in_ex_return, in_volatility, in_skewness, in_kurtosis]
-
-if plot_final:
-    plt.subplot(211).set_title('The ex post realized excess return on the ex ante recovered expected return')
-    plt.plot(es50_P_values_daily.index.to_pydatetime(), es50_P_values_daily['P_LN_Returns'])
-    plt.legend()
-    plt.xlabel('Date')
-    plt.ylabel('Innovation')
-
-    plt.subplot(212).set_title("Conditional EXPECTED 30-days Excess-Returns")
-    plt.suptitle('Conditional EXPECTED 30-days Excess-Returns')
-    expectations['loctimestamp'] = pd.to_datetime(expectations['loctimestamp'])
-    for day in days_to_maturity_all:
-        plt.plot(expectations.loc[(expectations['daystomaturity'] == day)]['loctimestamp'].dt.to_pydatetime(), expectations.loc[(expectations['daystomaturity'] == day), ['exp_r']], label="%s" % (day))
-
-    plt.legend()
-    plt.xlabel('Date')
-    plt.ylabel('Conditional Exp Ex R in %')
-
-print("\n")
-print("--------------- Daily Innovation --------")
-print(innovation_daily.head())
-print("-----------------------------------------")
-print("\n")
-
-# ---------------- Innovation for 30 days excess return ----------------
-# innovation in 30 days excess return
-
-for index, expectation in monthly_exp_excess_return.iterrows():
-    realized_P_value_30_days    = es50_P_values_30_days.loc[es50_P_values_30_days.index == np.datetime64(index.date())]
-
-    for maturity in days_to_maturity_all:
-        in_ex_return        = realized_P_value_30_days['30_days_P_LN_Return'].values[0] - expectation[maturity]
-        innovation_30_days.loc[len(innovation_30_days)] = [np.datetime64(index.date()), maturity, in_ex_return]
-
-if plot_final:
-    plt.figure('Innovation')
-    plt.suptitle('Innovation between 30 days realized and expected excess return')
-    for day in days_to_maturity_all:
-        plt.plot(innovation_30_days['date'].dt.to_pydatetime(), innovation_30_days['in_ex_return'], label="%s"%(day))
-
-    plt.legend()
-    plt.xlabel('Date')
-    plt.ylabel('Innovation')
-
-print("\n")
-print("--------------- 30 days innovation on excess return -------------")
-print(innovation_30_days.head())
-print("-----------------------------------------------------------------")
-print("\n")
+avg_daily_ln_return                     = np.mean(es50_P_values_daily['P_LN_Returns'])
+avg_30_day_ln_return                    = np.mean(es50_P_values_30_days['30_days_P_LN_Return'])
 
 #
 # =========================================================================
@@ -525,41 +468,58 @@ print("\n")
 # that is time-varying risk premia!
 # ß1 > 0 -> higher ex ante expected return ist associated with higher ex post realized return
 
-# ---------------- Regression Returns ----------------
+# ---------------- Regression  ----------------
 
-es50_P_values_30_days               = es50_P_values_30_days.fillna(0)
-es50_P_values_30_days               = es50_P_values_30_days[dates[0]:dates[-1]]
-
-monthly_exp_excess_return           = monthly_exp_excess_return.fillna(0)
-monthly_exp_excess_return           = monthly_exp_excess_return[1:len(monthly_exp_excess_return)]
-ols_estimates_exp_excess_return     = pd.DataFrame(columns=['maturity', 'ß0', 'ß1'])
+ols         = pd.DataFrame(columns=['maturity','ß_ret_0','ß_ret_1','ß_var_0','ß_var_1','ß_ske_0','ß_ske_1','ß_kur_0','ß_kur_1'])
 
 for day in days_to_maturity_all:
-    Y = es50_P_values_30_days.values
-    X = np.reshape(monthly_exp_excess_return[day].values, (1,len(monthly_exp_excess_return))).T
-    X = sm.add_constant(X)
+    values  = pd.merge(es50_P_values_daily, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
 
-    model   = sm.OLS(Y, X)
-    results = model.fit()
-    ols_estimates_exp_excess_return.loc[len(ols_estimates_exp_excess_return)] = [day, results.params[0], results.params[1]]
-    print("Regression - Modell for maturity: ", day, ' -> ß0 = ', results.params[0], " and ß1 = ", results.params[1])
+    # ---------------- Regression Returns ----------------
+    Y_ret = values['P_LN_Returns'].values
+    X_ret = np.reshape(values['exp_vol'].values, (1, len(values))).T
+    X_ret = sm.add_constant(X_ret)
 
-# ---------------- Regression Volatility ----------------
-# regress expected daily Variance on realized daily Variance
-es50_P_values_daily['P_variance']
-ols_estimates_variance     = pd.DataFrame(columns=['maturity', 'ß0', 'ß1'])
+    model_ret = sm.OLS(Y_ret, X_ret)
+    results_ret = model_ret.fit()
 
-# ---------------- Regression Skewness ----------------
-# regress expected daily Skewness on realized daily Skewness
-es50_P_values_daily['P_skewness']
-ols_estimates_skewness     = pd.DataFrame(columns=['maturity', 'ß0', 'ß1'])
+    # ---------------- Regression Volatility ----------------
+    Y_var = values['P_variance'].values
+    X_var = np.reshape(values['exp_vol'].values, (1,len(values))).T
+    X_var = sm.add_constant(X_var)
 
+    model_var = sm.OLS(Y_var, X_var)
+    results_var = model_var.fit()
 
-# ---------------- Regression Kurtosis ----------------
-# regress expected daily Kurtosis on realized daily Kurtosis
-es50_P_values_daily['P_kurtosis']
-ols_estimates_kurtosis     = pd.DataFrame(columns=['maturity', 'ß0', 'ß1'])
+    # ---------------- Regression Skewness ----------------
+    Y_ske = values['P_skewness'].values
+    X_ske = np.reshape(values['exp_skew'].values, (1, len(values))).T
+    X_ske = sm.add_constant(X_ske)
 
+    model_ske = sm.OLS(Y_ske, X_ske)
+    results_ske = model_ske.fit()
+
+    # ---------------- Regression Kurtosis ----------------
+    Y_kur = values['P_kurtosis'].values
+    X_kur = np.reshape(values['exp_kur'].values, (1,len(values))).T
+    X_kur = sm.add_constant(X_kur)
+
+    model_kur = sm.OLS(Y_kur, X_kur)
+    results_kur = model_kur.fit()
+
+    ols.loc[len(ols)] = [day, results_ret.params[0], results_ret.params[1],
+                              results_var.params[0], results_var.params[1],
+                              results_ske.params[0], results_ske.params[1],
+                              results_kur.params[0], results_kur.params[1]]
+
+    print("Regression - Modell: ")
+    print(ols)
+
+# scatter-plot data
+ax = df.plot(x='motifScore', y='expression', kind='scatter')
+
+# plot regression line
+abline_plot(model_results=model.fit(), ax=ax)
 
 #
 # =========================================================================

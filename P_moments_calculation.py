@@ -68,7 +68,6 @@ for date in es50.index.map(lambda t: t.date()).unique():
 
     values              = es50[date: (np.datetime64(date) + np.timedelta64(1, 'D'))]
     ln_return           = np.log(values.iloc[-1]['price'] / values.iloc[0]['price'])*100
-    excess_ln_return    = ln_return - rf.loc[(rf['loctimestamp'].dt.date == date)]['riskfree']
     variance            = np.sum(values['P_LN_Returns']**2)
     skewness            = np.sqrt(values.shape[0])*np.sum(values['P_LN_Returns']**3) / variance**(3/2)
     kurtosis            = np.sqrt(values.shape[0])*np.sum(values['P_LN_Returns']**4) / variance**(2)
