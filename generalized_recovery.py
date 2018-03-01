@@ -301,12 +301,11 @@ for date in data_rnd['loctimestamp'].unique():
     delta_diag_invers   = np.linalg.inv(delta_diag)
 
     P_init              = delta_diag_invers.dot(pi).dot(np.diag(B.dot(teta)))
+    P_init              = np.asarray(P_init)
+    P_integral          = integrate.trapz(P_init, states)
 
-    # normalize P to have row sums of one
-    kernel              = integrate.trapz(states * pricing_kernel, states)
-    P                   = np.asarray(P_init / kernel)
-
-    # TODO - normalize Kernel to have an expected value of 1/rf
+    # normalize P by the sum of each P-density integral
+    P                   = P_init / np.reshape(P_integral, (1, len(P_integral))).T
 
     plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
     plt.subplot(211).set_title('PHYSICAL PROBABILITY DISTRIBUTION')
@@ -317,12 +316,37 @@ for date in data_rnd['loctimestamp'].unique():
     plt.xlabel('States')
     plt.ylabel('Physical Probability')
 
+    # check if integral under each P-density is equal to one
     print("\n")
     print("--- MULTI-PERIOD PHYSICAL PROBABILITIES ---")
     print("Multi-Period physical probabilities    - Data: ")
+    print("Integral of each P-Density: -> ", integrate.trapz(P, states))
     print(P)
     print("Multi-Period physical probabilities    - Shape:", P.shape)
     print(SEPERATOR)
+
+    # ---------------- SDF normalization ----------------
+    # TODO - normalize Kernel to have an expected value of 1/(1+rf)
+    SDF_init    = pi / P_init
+    SDF         = pi / P
+
+    # recovered P-density for each maturity based on Arrow-Debreu-Prices and Inverse-Pricing-Kernel
+    P_test = pi / inv_pricing_kernel
+
+    # SDF and SDF_norm are identical
+    SDF         = pi / P
+    SDF_norm    = pricing_kernel * SDF_init
+
+    print(integrate.trapz(SDF_norm, states))
+    print(integrate.trapz(pricing_kernel * P, states))
+
+    plt.figure('PRICING KERNEL NORMALIZED')
+    for i in range(0, SDF_norm.shape[0]):
+        plt.plot(states, SDF[i], label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
+
+    plt.legend(days_to_maturity)
+    plt.xlabel('States')
+    plt.ylabel('PRICING KERNEL')
 
     #
     # =========================================================================

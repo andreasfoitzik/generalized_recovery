@@ -26,7 +26,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
 import statsmodels.api as sm
-from statsmodels.graphics.regressionplots import abline_plot
+
 
 
 #
@@ -78,7 +78,7 @@ plot_final                      = True
 cmap                            = plt.cm.get_cmap("hsv", 12)
 
 dates                           = data_rnd_all['loctimestamp'].unique()
-dates                           = dates[2000:2200]
+dates                           = dates[2000:2100]
 
 #
 #====================================================
@@ -285,12 +285,11 @@ for index, date in enumerate(dates):
         print("Singular-Matrix - based on poor data!")
 
     P_init              = delta_diag_invers.dot(pi).dot(np.diag( B.dot(teta)))
+    P_init              = np.asarray(P_init)
 
     # normalize P to have row sums of one
-    kernel              = integrate.trapz(states * pricing_kernel, states)
-    P                   = np.asarray(P_init / kernel)
-
-    # TODO - normalize Kernel to have an expected value of 1/rf
+    kernel_init         = integrate.trapz(states * inv_pricing_kernel, states)
+    P                   = P_init / kernel_init
 
     if plot:
         plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
@@ -301,7 +300,29 @@ for index, date in enumerate(dates):
         plt.legend(days_to_maturity)
         plt.xlabel('States')
         plt.ylabel('Physical Probability')
+    '''
+    # TODO - normalize Kernel to have an expected value of 1/rf
+    kernel_SDF  = pi / P
+    kernel_norm = kernel_init * kernel_SDF
 
+    for i in range(0, len(pi)):
+        kernel1 = kernel_norm[i][~np.isnan(kernel_norm[i])]
+        kernel2 = kernel1[~np.isinf(kernel1)]
+
+        states0_1 = states[~np.isnan(kernel_norm[i])]
+        states0_2 = states0_1[~np.isinf(kernel1)]
+
+        integrate.trapz(states0_2 * kernel2, states0_2)
+    
+    if plot:
+        plt.figure('PRICING KERNEL NORMALIZED')
+        for i in range(0, kernel_norm.shape[0]):
+            plt.plot(states, kernel_norm[i], label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
+
+        plt.legend(days_to_maturity)
+        plt.xlabel('States')
+        plt.ylabel('PRICING KERNEL')
+    '''
     #
     # =========================================================================
     #     Computing Statistics under the Physical Probability Distribution
@@ -396,46 +417,32 @@ plt.legend(days_to_maturity_all)
 plt.xlabel('Date')
 plt.ylabel('Return in %')
 
-#
-# =========================================================================
-#                           Calculate Results
-# =========================================================================
-#
+plt.figure('EXPECTED VARIANCE')
+plt.suptitle('EXPECTED VARIANCE')
+for i in range(0, len(days_to_maturity)):
+    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_vol'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
-# ---------------- Calculate Conditional EXPECTED 30-days Excess-Returns ----------------
-# get expected value for each maturity
-# merge both dataframes to calculate the excess return for the expected values in the past
-# TODO - annualize monthly return
+plt.legend(days_to_maturity_all)
+plt.xlabel('Date')
+plt.ylabel('Variance')
 
-for day in days_to_maturity_all:
-    data                        = expectations.loc[(expectations['daystomaturity'] == day), ['loctimestamp', 'exp_r']].copy()
-    data                        = data.set_index('loctimestamp')
+plt.figure('EXPECTED SKEWNESS')
+plt.suptitle('EXPECTED SKEWNESS')
+for i in range(0, len(days_to_maturity)):
+    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_skew'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
-    monthly_recovered_return    = data.resample('30D').last()
-    monthly_recovered_return['returns']    = monthly_recovered_return.pct_change()
+plt.legend(days_to_maturity_all)
+plt.xlabel('Date')
+plt.ylabel('Skewness')
 
-    average_exp_excess_return.append(np.mean(monthly_exp_excess_return[day]))
+plt.figure('EXPECTED KURTOSIS')
+plt.suptitle('EXPECTED KURTOSIS')
+for i in range(0, len(days_to_maturity)):
+    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_kur'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
-    del data
-
-# annualize averaged monthly expected returns
-average_exp_excess_return = [np.sqrt(12)*x for x in average_exp_excess_return]
-
-if plot_final:
-    plt.figure('Conditional EXPECTED 30-days Excess-Returns')
-    plt.suptitle('Conditional EXPECTED 30-days Excess-Returns')
-    for day in days_to_maturity_all:
-        plt.plot(monthly_exp_excess_return.index.to_pydatetime(), monthly_exp_excess_return[day], label="%s"%(day))
-
-    plt.legend()
-    plt.xlabel('Date')
-    plt.ylabel('Conditional Exp Ex R in %')
-
-print("\n")
-print("---- Monthly expected excess return ----")
-print(monthly_exp_excess_return.head())
-print("----------------------------------------")
-print("\n")
+plt.legend(days_to_maturity_all)
+plt.xlabel('Date')
+plt.ylabel('Kurtosis')
 
 #
 # =========================================================================
@@ -445,14 +452,33 @@ print("\n")
 #
 
 # values calculated by P_moments_calculation.py
-es50_P_values_daily                     = pd.read_csv("data/es50_P_values_daily.csv", sep = ';')
-es50_P_values_daily['loctimestamp']     = pd.to_datetime(es50_P_values_daily['loctimestamp'])
+es50_P_values_daily          = pd.read_csv("data/P_values/es50_P_values_daily.csv", sep = ';', parse_dates=['loctimestamp'])
+es50_P_values_7_days         = pd.read_csv("data/P_values/es50_P_values_7_days.csv", sep = ';', parse_dates=['loctimestamp'])
+es50_P_values_30_days        = pd.read_csv("data/P_values/es50_P_values_30_days.csv", sep = ';', parse_dates=['loctimestamp'])
+es50_P_values_60_days        = pd.read_csv("data/P_values/es50_P_values_60_days.csv", sep = ';', parse_dates=['loctimestamp'])
+es50_P_values_91_days        = pd.read_csv("data/P_values/es50_P_values_91_days.csv", sep = ';', parse_dates=['loctimestamp'])
+es50_P_values_182_days       = pd.read_csv("data/P_values/es50_P_values_182_days.csv", sep = ';', parse_dates=['loctimestamp'])
+es50_P_values_365_days       = pd.read_csv("data/P_values/es50_P_values_365_days.csv", sep = ';', parse_dates=['loctimestamp'])
 
-es50_P_values_30_days                   = pd.read_csv("data/es50_P_values_30_days.csv", sep = ';')
-es50_P_values_30_days['loctimestamp']   = pd.to_datetime(es50_P_values_30_days['loctimestamp'])
+# average expected returns
+avg_daily_return             = np.mean(es50_P_values_daily['P_Returns'])
+avg_7_days_return            = np.mean(es50_P_values_7_days['P_Returns'])
+avg_30_days_return           = np.mean(es50_P_values_30_days['P_Returns'])
+avg_60_days_return           = np.mean(es50_P_values_60_days['P_Returns'])
+avg_91_days_return           = np.mean(es50_P_values_91_days['P_Returns'])
+avg_182_days_return          = np.mean(es50_P_values_182_days['P_Returns'])
+avg_365_days_return          = np.mean(es50_P_values_365_days['P_Returns'])
 
-avg_daily_ln_return                     = np.mean(es50_P_values_daily['P_LN_Returns'])
-avg_30_day_ln_return                    = np.mean(es50_P_values_30_days['30_days_P_LN_Return'])
+print("Mean - Expectation -> Maturity: DAILY", avg_daily_return)
+print("Mean - Expectation -> Maturity: 7 DAYS", avg_7_days_return)
+print("Mean - Expectation -> Maturity: 30 DAYS", avg_30_days_return)
+print("Mean - Expectation -> Maturity: 60 DAYS", avg_60_days_return)
+print("Mean - Expectation -> Maturity: 91 DAYS", avg_91_days_return)
+print("Mean - Expectation -> Maturity: 182 DAYS", avg_182_days_return)
+print("Mean - Expectation -> Maturity: 365 DAYS", avg_365_days_return)
+
+for day in days_to_maturity:
+    print("Mean - Expectation -> Maturity: ", day, " ", np.mean(expectations.loc[expectations['daystomaturity'] == day]['exp_r']))
 
 #
 # =========================================================================
@@ -473,11 +499,27 @@ avg_30_day_ln_return                    = np.mean(es50_P_values_30_days['30_days
 ols         = pd.DataFrame(columns=['maturity','ß_ret_0','ß_ret_1','ß_var_0','ß_var_1','ß_ske_0','ß_ske_1','ß_kur_0','ß_kur_1'])
 
 for day in days_to_maturity_all:
-    values  = pd.merge(es50_P_values_daily, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+
+    values = pd.DataFrame()
+
+    if day == days_to_maturity_all[0]:
+        values  = pd.merge(es50_P_values_7_days, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif day == days_to_maturity_all[1]:
+        values = pd.merge(es50_P_values_30_days, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif day == days_to_maturity_all[2]:
+        values = pd.merge(es50_P_values_60_days, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif day == days_to_maturity_all[3]:
+        values = pd.merge(es50_P_values_91_days, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif day == days_to_maturity_all[4]:
+        values = pd.merge(es50_P_values_182_days, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif day == days_to_maturity_all[5]:
+        values = pd.merge(es50_P_values_365_days, expectations.loc[expectations['daystomaturity'] == day], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
 
     # ---------------- Regression Returns ----------------
-    Y_ret = values['P_LN_Returns'].values
-    X_ret = np.reshape(values['exp_vol'].values, (1, len(values))).T
+    Y_ret = values['P_Returns'].values
+    X_ret = np.reshape(values['exp_r'].values, (1, len(values))).T
+    Y_ret[np.isnan(Y_ret)] = 0
+    X_ret[np.isnan(X_ret)] = 0
     X_ret = sm.add_constant(X_ret)
 
     model_ret = sm.OLS(Y_ret, X_ret)
@@ -486,6 +528,8 @@ for day in days_to_maturity_all:
     # ---------------- Regression Volatility ----------------
     Y_var = values['P_variance'].values
     X_var = np.reshape(values['exp_vol'].values, (1,len(values))).T
+    Y_var[np.isnan(Y_var)] = 0
+    X_var[np.isnan(X_var)] = 0
     X_var = sm.add_constant(X_var)
 
     model_var = sm.OLS(Y_var, X_var)
@@ -494,6 +538,8 @@ for day in days_to_maturity_all:
     # ---------------- Regression Skewness ----------------
     Y_ske = values['P_skewness'].values
     X_ske = np.reshape(values['exp_skew'].values, (1, len(values))).T
+    Y_ske[np.isnan(Y_ske)] = 0
+    X_ske[np.isnan(X_ske)] = 0
     X_ske = sm.add_constant(X_ske)
 
     model_ske = sm.OLS(Y_ske, X_ske)
@@ -502,6 +548,8 @@ for day in days_to_maturity_all:
     # ---------------- Regression Kurtosis ----------------
     Y_kur = values['P_kurtosis'].values
     X_kur = np.reshape(values['exp_kur'].values, (1,len(values))).T
+    Y_kur[np.isnan(Y_kur)] = 0
+    X_kur[np.isnan(X_kur)] = 0
     X_kur = sm.add_constant(X_kur)
 
     model_kur = sm.OLS(Y_kur, X_kur)
@@ -515,11 +563,41 @@ for day in days_to_maturity_all:
     print("Regression - Modell: ")
     print(ols)
 
-# scatter-plot data
-ax = df.plot(x='motifScore', y='expression', kind='scatter')
+    del values
 
-# plot regression line
-abline_plot(model_results=model.fit(), ax=ax)
+# ---------------- Plotting Results ----------------
+
+x1 = 0
+x2 = 0.002
+x3 = 0.004
+
+for day in range(0, len(days_to_maturity_all)):
+    del values
+    values = pd.DataFrame()
+
+    if days_to_maturity_all[day] == days_to_maturity_all[0]:
+        values = pd.merge(es50_P_values_7_days, expectations.loc[expectations['daystomaturity'] == days_to_maturity_all[day]], how='inner',left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif days_to_maturity_all[day] == days_to_maturity_all[1]:
+        values = pd.merge(es50_P_values_30_days, expectations.loc[expectations['daystomaturity'] == days_to_maturity_all[day]], how='inner',left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif days_to_maturity_all[day] == days_to_maturity_all[2]:
+        values = pd.merge(es50_P_values_60_days, expectations.loc[expectations['daystomaturity'] == days_to_maturity_all[day]], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif days_to_maturity_all[day] == days_to_maturity_all[3]:
+        values = pd.merge(es50_P_values_91_days, expectations.loc[expectations['daystomaturity'] == days_to_maturity_all[day]], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif days_to_maturity_all[day] == days_to_maturity_all[4]:
+        values = pd.merge(es50_P_values_182_days, expectations.loc[expectations['daystomaturity'] == days_to_maturity_all[day]], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+    elif days_to_maturity_all[day] == days_to_maturity_all[5]:
+        values = pd.merge(es50_P_values_365_days, expectations.loc[expectations['daystomaturity'] == days_to_maturity_all[day]], how='inner', left_on=['loctimestamp'], right_on=['loctimestamp'])
+
+    y1 = ols['ß_ret_0'][day] + ols['ß_ret_1'][day] * x1
+    y2 = ols['ß_ret_0'][day] + ols['ß_ret_1'][day] * x2
+    y3 = ols['ß_ret_0'][day] + ols['ß_ret_1'][day] * x3
+
+    plt.figure('REGRESSION Returns - Maturity %s' % (days_to_maturity_all[day]))
+    plt.suptitle('REGRESSION Returns')
+    plt.scatter(values['exp_r'], values['P_Returns'])
+    plt.plot([x1, x2, x3], [y1, y2, y3])
+    plt.xlabel('Expected Returns')
+    plt.ylabel('Realized Returns')
 
 #
 # =========================================================================
