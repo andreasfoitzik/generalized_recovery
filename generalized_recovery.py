@@ -307,15 +307,6 @@ for date in data_rnd['loctimestamp'].unique():
     # normalize P by the sum of each P-density integral
     P                   = P_init / np.reshape(P_integral, (1, len(P_integral))).T
 
-    plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
-    plt.subplot(211).set_title('PHYSICAL PROBABILITY DISTRIBUTION')
-    for i in range(0, P.shape[0]):
-        plt.plot(states, P[i], label='Days to maturity %s'%(days_to_maturity[i]), color=cmap(i))
-
-    plt.legend()
-    plt.xlabel('States')
-    plt.ylabel('Physical Probability')
-
     # check if integral under each P-density is equal to one
     print("\n")
     print("--- MULTI-PERIOD PHYSICAL PROBABILITIES ---")
@@ -326,22 +317,18 @@ for date in data_rnd['loctimestamp'].unique():
     print(SEPERATOR)
 
     # ---------------- SDF normalization ----------------
-    # TODO - normalize Kernel to have an expected value of 1/(1+rf)
+    # normalize Kernel to have an expected value of 1/(1+rf)
     SDF_init    = pi / P_init
     SDF         = pi / P
 
     # recovered P-density for each maturity based on Arrow-Debreu-Prices and Inverse-Pricing-Kernel
     P_test = pi / inv_pricing_kernel
 
-    # SDF and SDF_norm are identical
-    SDF         = pi / P
-    SDF_norm    = pricing_kernel * SDF_init
-
-    print(integrate.trapz(SDF_norm, states))
+    print(integrate.trapz(SDF, states))
     print(integrate.trapz(pricing_kernel * P, states))
 
-    plt.figure('PRICING KERNEL NORMALIZED')
-    for i in range(0, SDF_norm.shape[0]):
+    plt.figure('SDF/ PRICING KERNEL NORMALIZED')
+    for i in range(0, SDF.shape[0]):
         plt.plot(states, SDF[i], label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
 
     plt.legend(days_to_maturity)
@@ -353,6 +340,15 @@ for date in data_rnd['loctimestamp'].unique():
     #     Computing Statistics under the Physical Probability Distribution
     # =========================================================================
     #
+
+    plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
+    plt.subplot(211).set_title('PHYSICAL PROBABILITY DISTRIBUTION')
+    for i in range(0, P.shape[0]):
+        plt.plot(states, P[i], label='Days to maturity %s'%(days_to_maturity[i]), color=cmap(i))
+
+    plt.legend()
+    plt.xlabel('States')
+    plt.ylabel('Physical Probability')
 
     # ---------------- calculating moments under P-density ----------------
     exp_r   = np.zeros(len(P))

@@ -56,7 +56,7 @@ es50_5min                   = es50_5min[begin:end]
 #
 
 # intraday returns in percentage
-es50_5min['P_Returns']     = (es50_5min['price'] / es50_5min['price'].shift(1))-1
+es50_5min['P_Returns']     = (es50_5min['price'] / es50_5min['price'].shift(1))
 
 plt.figure('Intraday Realized Returns')
 plt.suptitle('Intraday Realized Returns under P-Density')
@@ -78,7 +78,7 @@ for date in es50.index.map(lambda t: t.date()).unique():
     values                          = es50[date: (np.datetime64(date) + np.timedelta64(1, 'D'))]
     opening_price                   = values.iloc[0]['price']
     closing_price                   = values.iloc[-1]['price']
-    returns                         = (closing_price / opening_price)-1
+    returns                         = (closing_price / opening_price)
     variance                        = np.sum(values['P_Returns']**2)
     skewness                        = np.sqrt(values.shape[0])*np.sum(values['P_Returns']**3) / variance**(3/2)
     kurtosis                        = np.sqrt(values.shape[0])*np.sum(values['P_Returns']**4) / variance**(2)
@@ -128,7 +128,7 @@ for date in es50.index.map(lambda t: t.date()).unique():
     for maturity in maturities:
         t_maturity          = (np.datetime64(date) + np.timedelta64(maturity, 'D'))
         values              = es50[date: t_maturity]
-        returns             = (values.iloc[-1]['Closing_Price'] / values.iloc[0]['Closing_Price']) -1
+        returns             = (values.iloc[-1]['Closing_Price'] / values.iloc[0]['Closing_Price'])
         variance            = np.sum(values['P_Returns']**2)
         skewness            = np.sqrt(values.shape[0])*np.sum(values['P_Returns']**3) / variance**(3/2)
         kurtosis            = np.sqrt(values.shape[0])*np.sum(values['P_Returns']**4) / variance**(2)
@@ -208,20 +208,20 @@ plt.ylabel(TXT_RETURN_IN_PCT)
 # =========================================================================
 #
 
-es50_daily.to_csv(FILE_PATH,"/es50_P_values_daily.csv", sep=';')
-es50_7_days.to_csv(FILE_PATH,"/es50_P_values_7_days.csv", sep=';')
-es50_30_days.to_csv(FILE_PATH,"/es50_P_values_30_days.csv", sep=';')
-es50_60_days.to_csv(FILE_PATH,"/es50_P_values_60_days.csv", sep=';')
-es50_91_days.to_csv(FILE_PATH,"/es50_P_values_91_days.csv", sep=';')
-es50_182_days.to_csv(FILE_PATH,"/es50_P_values_182_days.csv", sep=';')
-es50_365_days.to_csv(FILE_PATH,"/es50_P_values_365_days.csv", sep=';')
+es50_daily.to_csv("%s/es50_P_values_daily.csv" % (FILE_PATH), sep=';')
+es50_7_days.to_csv("%s/es50_P_values_7_days.csv" % (FILE_PATH), sep=';')
+es50_30_days.to_csv("%s/es50_P_values_30_days.csv" % (FILE_PATH), sep=';')
+es50_60_days.to_csv("%s/es50_P_values_60_days.csv" % (FILE_PATH), sep=';')
+es50_91_days.to_csv("%s/es50_P_values_91_days.csv" % (FILE_PATH), sep=';')
+es50_182_days.to_csv("%s/es50_P_values_182_days.csv" % (FILE_PATH), sep=';')
+es50_365_days.to_csv("%s/es50_P_values_365_days.csv" % (FILE_PATH), sep=';')
 
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_daily.csv ")
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_7_days.csv ")
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_30_days.csv ")
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_60_days.csv ")
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_91_days.csv ")
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_182_days.csv ")
-print(TXT_CREATED_SUCCESS," ", FILE_PATH,"/es50_P_values_364_days.csv ")
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_daily.csv "  % (FILE_PATH))
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_7_days.csv "  % (FILE_PATH))
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_30_days.csv "  % (FILE_PATH))
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_60_days.csv "  % (FILE_PATH))
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_91_days.csv "  % (FILE_PATH))
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_182_days.csv "  % (FILE_PATH))
+print(TXT_CREATED_SUCCESS," %s/es50_P_values_364_days.csv "  % (FILE_PATH))
 
 plt.show()

@@ -4,6 +4,21 @@
 #   Generalized Recovery Model
 #   based on Christian Skov Jensen, David Lando, and Lasse Heje Pedersen; version of December 21, 2016
 #
+#   RECOVERY OF
+#   * Physical Probabilities
+#   * Marginal Utilities
+#   * Discount Rate
+#
+#   PURPOSE
+#   * Statistical Interpretation
+#   * Prediction
+#
+#   RESTRICTIONS
+#   * Recovery is only possible if S <= T
+#   * Challenge for large State Space where S > T
+#   * Therefore parameterize Utility Function / Pricing Kernel with N Parameter
+#   * based on S = N+1 <= T recovery is possible again
+#
 #   done by Andreas Foitzik
 #========================================================================================
 #
@@ -37,8 +52,8 @@ import statsmodels.api as sm
 
 # ---------------- variable declarations ----------------
 MATURITY_365                = 365
-TETAS_AMOUNT                = 11
-STATE_SPACES_AMOUNT         = 10
+TETAS_AMOUNT                = 5
+STATE_SPACES_AMOUNT         = TETAS_AMOUNT-1
 
 # ---------------- Load Data ----------------
 data_qvar_all                   = pd.read_csv("data/FiglewskiStandardizationEOD_DE0009652396D1_Qmoments.csv", sep = ';')
@@ -67,7 +82,7 @@ maturities_all                  = np.sort(np.array(data_rnd_all['maturity'].uniq
 days_to_maturity_all            = np.sort(np.array(data_rnd_all['daystomaturity'].unique()))
 
 # ---------------- Declare Variables ----------------
-teta                            = np.zeros(11)
+teta                            = np.zeros(TETAS_AMOUNT)
 
 expectations                    = pd.DataFrame(columns=['loctimestamp', 'daystomaturity', 'exp_r', 'exp_vol', 'exp_skew', 'exp_kur'])
 monthly_exp_excess_return       = pd.DataFrame(columns=days_to_maturity_all)
@@ -78,13 +93,19 @@ plot_final                      = True
 cmap                            = plt.cm.get_cmap("hsv", 12)
 
 dates                           = data_rnd_all['loctimestamp'].unique()
-dates                           = dates[2000:2100]
+#dates                           = dates[2001:2002]
 
 #
 #====================================================
 #              GENERALIZED RECOVERY
 #====================================================
 #
+
+# N + 1 <= T otherwise there's no unique solution
+
+if TETAS_AMOUNT > len(days_to_maturity_all):
+    print("Too many time horizons for N+1. No unique solution exists.")
+    sys.exit()
 
 # ---------------- For each date ----------------
 
@@ -108,7 +129,7 @@ for index, date in enumerate(dates):
 
     # ---------------- State-Space ----------------
     # get highest variance, for largest state space
-    current_VIX             = data_qvar.loc[(data_qvar['daystomaturity'] == 365)]['Q_variance'].values[0]
+    current_VIX             = data_qvar.loc[(data_qvar['daystomaturity'] == MATURITY_365)]['Q_variance'].values[0]
 
     # as state we use the current return, which is 1
     lowest_State            = 1 - (2.5 * current_VIX)
@@ -150,6 +171,8 @@ for index, date in enumerate(dates):
         plt.ylabel('Arrow-Debreu-Prices')
 
     # ---------------- Discount-Factor Closed-Form Recovery ----------------
+    # linearization of discount rate
+
     alpha                       = np.zeros(len(maturities_all))
     beta                        = np.zeros(len(maturities_all))
     delta                       = np.zeros(len(maturities_all))
@@ -161,7 +184,10 @@ for index, date in enumerate(dates):
         beta[i]         = maturities_all[i] * (delta_zero ** (maturities_all[i] - 1))
         delta[i]        = alpha[i] + beta[i] * delta_zero
 
-    # ---------------- 10 State-Spaces ----------------
+    # ---------------- X State-Spaces ----------------
+    # TETA - 1 State Spaces are needed
+    # create State Spaces
+
     state_spaces = []
     state_space = np.zeros((STATE_SPACES_AMOUNT, 2))
 
@@ -171,37 +197,39 @@ for index, date in enumerate(dates):
 
     state_space_equal_portion_from = 1 - 2 * current_VIX
     state_space_equal_portion_to = 1 + 2 * current_VIX
-    portion = (state_space_equal_portion_to - state_space_equal_portion_from) / 8
+    portion = (state_space_equal_portion_to - state_space_equal_portion_from) / (STATE_SPACES_AMOUNT-2)
 
-    for i in range(1, 9):
+    for i in range(1, (STATE_SPACES_AMOUNT-1)):
         state_space[i, 0] = state_space[i - 1, 1]
         state_space[i, 1] = state_space[i, 0] + portion
         state_spaces.append(np.matrix(states[(states >= state_space[i, 0]) & (states < state_space[i, 1])]))
 
-    state_space[9, 0] = 1 + 2 * current_VIX
-    state_space[9, 1] = 1 + 4 * current_VIX
-    state_spaces.append(np.matrix(states[(states >= state_space[9, 0]) & (states < state_space[9, 1])]))
+    state_space[STATE_SPACES_AMOUNT-1, 0] = 1 + 2 * current_VIX
+    state_space[STATE_SPACES_AMOUNT-1, 1] = 1 + 4 * current_VIX
+    state_spaces.append(np.matrix(states[(states >= state_space[STATE_SPACES_AMOUNT-1, 0]) & (states < state_space[STATE_SPACES_AMOUNT-1, 1])]))
 
     # ---------------- Design-Matrix B ----------------
+    # create DESIGN-MATRIX B
+    # with Dimensions SxT
+
     B                       = np.zeros((len(states), len(teta)))
-    # counting the rank of the matrix
-    amount_of_states_set    = 0
 
     # Design Matrix Level
-    for i in range (0, len(states)):
+    for i in range (0, states.shape[0]):
         B[i, 0]     = 1.00
 
     # Design Matrix State Space 1
     for i in range(0, state_spaces[0].shape[1]):
-        B[i, 1] = (i) / state_spaces[0].shape[1]
+        B[i, 1]     = i / state_spaces[0].shape[1]
 
-    amount_of_states_set += state_spaces[0].shape[1]
-    for i in range(amount_of_states_set, len(states)):
+    amount_of_states_set    = 0
+    amount_of_states_set   += state_spaces[0].shape[1]
+    for i in range(amount_of_states_set, states.shape[0]):
         B[i, 1] = 1
 
-    # Design Matrix for State Space 2 till 10
-    for a in range(1, len(state_spaces)):
-        for i in range(0, amount_of_states_set):
+    # Design Matrix for State Space 2 till T
+    for a in range(1, STATE_SPACES_AMOUNT):
+        for i in range(1, amount_of_states_set):
             B[i, a + 1] = 0
         counter = 0
         amount_of_states_putting = (amount_of_states_set + state_spaces[a].shape[1])
@@ -223,16 +251,23 @@ for index, date in enumerate(dates):
         plt.ylabel('Column')
 
     # ---------------- Minimization-Problem ----------------
+    bnds        = []
+    x0_seed     = []
+
     # boundaries
-    b1 = (0, None)
-    b2 = (0, 1.0)
-    bnds = [b1, b1, b1, b1, b1, b1, b1, b1, b1, b1, b1, b2]
+    b1          = (0, None)
+    b2          = (0, 1.0)
 
-    teta_seed = 1
-    rf_seed = np.sum(delta) / len(delta)
+    teta_seed   = 1
+    rf_seed     = np.sum(delta) / len(delta)
 
-    x0_seed = [1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.60, 0.55, 0.50, rf_seed]
+    for i in range(0, TETAS_AMOUNT):
+        x0_seed.append(teta_seed)
+        bnds.append(b1)
 
+    x0_seed.append(rf_seed)
+    bnds.append(b2)
+    x0_seed = [1, 0.975, 0.95, 0.925, 0.9, rf_seed]
     def objective(x0):
         x1 = x0[0:len(teta)]
         x2 = x0[len(teta):len(teta) + 1]
@@ -257,7 +292,7 @@ for index, date in enumerate(dates):
         for i in range (0, len(state_space)):
             plt.axvline(x=state_space[i,0], color='b')
 
-        plt.axvline(x=state_space[len(state_space)-1, 1], color='b')
+        plt.axvline(x=state_space[len(state_space)-1, 0], color='b')
         plt.legend()
         plt.xlabel('States')
         plt.ylabel('Inverse PRICING-KERNEL')
@@ -271,10 +306,10 @@ for index, date in enumerate(dates):
         for i in range(0, len(state_space)):
             plt.axvline(x=state_space[i, 0], color='b')
 
-        plt.axvline(x=state_space[len(state_space) - 1, 1], color='b')
+        plt.axvline(x=state_space[len(state_space) - 1, 0], color='b')
         plt.legend()
         plt.xlabel('States')
-        plt.ylabel('Inverse PRICING-KERNEL')
+        plt.ylabel('PRICING-KERNEL')
 
     # ---------------- Physical Probabilities ----------------
     delta_diag          = np.diagflat(np.matrix([delta_min**1,delta_min**2,delta_min**3,delta_min**4,delta_min**5,delta_min**6]))
@@ -284,12 +319,38 @@ for index, date in enumerate(dates):
     else:
         print("Singular-Matrix - based on poor data!")
 
-    P_init              = delta_diag_invers.dot(pi).dot(np.diag( B.dot(teta)))
+    P_init              = delta_diag_invers.dot(pi).dot(np.diag(B.dot(teta)))
     P_init              = np.asarray(P_init)
+    P_integral          = integrate.trapz(P_init, states)
 
-    # normalize P to have row sums of one
-    kernel_init         = integrate.trapz(states * inv_pricing_kernel, states)
-    P                   = P_init / kernel_init
+    # normalize P by the sum of each P-density integral
+    P                   = P_init / np.reshape(P_integral, (1, len(P_integral))).T
+
+    # ---------------- SDF normalization ----------------
+    # normalize Kernel to have an expected value of 1/(1+rf)
+    SDF_init    = pi / P_init
+    SDF         = pi / P
+
+    # recovered P-density for each maturity based on Arrow-Debreu-Prices and Inverse-Pricing-Kernel
+    P_test = pi / inv_pricing_kernel
+
+    integrate.trapz(SDF, states)
+    integrate.trapz(pricing_kernel * P, states)
+    
+    if plot:
+        plt.figure('SDF/ PRICING KERNEL NORMALIZED')
+        for i in range(0, SDF.shape[0]):
+            plt.plot(states, SDF[i], label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
+
+        plt.legend(days_to_maturity)
+        plt.xlabel('States')
+        plt.ylabel('PRICING KERNEL NORMALIZED')
+
+    #
+    # =========================================================================
+    #     Computing Statistics under the Physical Probability Distribution
+    # =========================================================================
+    #
 
     if plot:
         plt.figure('PHYSICAL PROBABILITY DISTRIBUTION')
@@ -300,34 +361,6 @@ for index, date in enumerate(dates):
         plt.legend(days_to_maturity)
         plt.xlabel('States')
         plt.ylabel('Physical Probability')
-    '''
-    # TODO - normalize Kernel to have an expected value of 1/rf
-    kernel_SDF  = pi / P
-    kernel_norm = kernel_init * kernel_SDF
-
-    for i in range(0, len(pi)):
-        kernel1 = kernel_norm[i][~np.isnan(kernel_norm[i])]
-        kernel2 = kernel1[~np.isinf(kernel1)]
-
-        states0_1 = states[~np.isnan(kernel_norm[i])]
-        states0_2 = states0_1[~np.isinf(kernel1)]
-
-        integrate.trapz(states0_2 * kernel2, states0_2)
-    
-    if plot:
-        plt.figure('PRICING KERNEL NORMALIZED')
-        for i in range(0, kernel_norm.shape[0]):
-            plt.plot(states, kernel_norm[i], label='Days to maturity %s' % (days_to_maturity[i]), color=cmap(i))
-
-        plt.legend(days_to_maturity)
-        plt.xlabel('States')
-        plt.ylabel('PRICING KERNEL')
-    '''
-    #
-    # =========================================================================
-    #     Computing Statistics under the Physical Probability Distribution
-    # =========================================================================
-    #
 
     # ---------------- calculating moments under P-density ----------------
     exp_r   = np.zeros(len(P))
@@ -469,16 +502,15 @@ avg_91_days_return           = np.mean(es50_P_values_91_days['P_Returns'])
 avg_182_days_return          = np.mean(es50_P_values_182_days['P_Returns'])
 avg_365_days_return          = np.mean(es50_P_values_365_days['P_Returns'])
 
-print("Mean - Expectation -> Maturity: DAILY", avg_daily_return)
-print("Mean - Expectation -> Maturity: 7 DAYS", avg_7_days_return)
-print("Mean - Expectation -> Maturity: 30 DAYS", avg_30_days_return)
-print("Mean - Expectation -> Maturity: 60 DAYS", avg_60_days_return)
-print("Mean - Expectation -> Maturity: 91 DAYS", avg_91_days_return)
-print("Mean - Expectation -> Maturity: 182 DAYS", avg_182_days_return)
-print("Mean - Expectation -> Maturity: 365 DAYS", avg_365_days_return)
+print("Mean - Realized P-Density -> Maturity: 7 DAYS", avg_7_days_return)
+print("Mean - Realized P-Density -> Maturity: 30 DAYS", avg_30_days_return)
+print("Mean - Realized P-Density -> Maturity: 60 DAYS", avg_60_days_return)
+print("Mean - Realized P-Density -> Maturity: 91 DAYS", avg_91_days_return)
+print("Mean - Realized P-Density -> Maturity: 182 DAYS", avg_182_days_return)
+print("Mean - Realized P-Density -> Maturity: 365 DAYS", avg_365_days_return)
 
 for day in days_to_maturity:
-    print("Mean - Expectation -> Maturity: ", day, " ", np.mean(expectations.loc[expectations['daystomaturity'] == day]['exp_r']))
+    print("Mean - Expected P-Density -> Maturity: ", day, " ", np.mean(expectations.loc[expectations['daystomaturity'] == day]['exp_r']))
 
 #
 # =========================================================================
@@ -567,12 +599,11 @@ for day in days_to_maturity_all:
 
 # ---------------- Plotting Results ----------------
 
-x1 = 0
-x2 = 0.002
-x3 = 0.004
+x1 = 0.8
+x2 = 1.0
+x3 = 1.2
 
 for day in range(0, len(days_to_maturity_all)):
-    del values
     values = pd.DataFrame()
 
     if days_to_maturity_all[day] == days_to_maturity_all[0]:
@@ -593,11 +624,13 @@ for day in range(0, len(days_to_maturity_all)):
     y3 = ols['ß_ret_0'][day] + ols['ß_ret_1'][day] * x3
 
     plt.figure('REGRESSION Returns - Maturity %s' % (days_to_maturity_all[day]))
-    plt.suptitle('REGRESSION Returns')
+    plt.suptitle('REGRESSION Returns - Maturity %s' % (days_to_maturity_all[day]))
     plt.scatter(values['exp_r'], values['P_Returns'])
     plt.plot([x1, x2, x3], [y1, y2, y3])
     plt.xlabel('Expected Returns')
     plt.ylabel('Realized Returns')
+
+    del values
 
 #
 # =========================================================================
