@@ -78,11 +78,11 @@ for date in es50.index.map(lambda t: t.date()).unique():
     values                          = es50[date: (np.datetime64(date) + np.timedelta64(1, 'D'))]
     opening_price                   = values.iloc[0]['price']
     closing_price                   = values.iloc[-1]['price']
-    returns                         = (closing_price / opening_price)
+    daily_return                    = (closing_price / opening_price)
     variance                        = np.sum(values['P_Returns']**2)
     skewness                        = np.sqrt(values.shape[0])*np.sum(values['P_Returns']**3) / variance**(3/2)
     kurtosis                        = np.sqrt(values.shape[0])*np.sum(values['P_Returns']**4) / variance**(2)
-    es50_daily.loc[len(es50_daily)] = [date, opening_price, closing_price, returns, variance, skewness, kurtosis]
+    es50_daily.loc[len(es50_daily)] = [date, opening_price, closing_price, daily_return, variance, skewness, kurtosis]
     es50                            = es50.drop(es50[date: (np.datetime64(date) + np.timedelta64(1, 'D'))].index)
 
 del es50

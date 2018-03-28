@@ -93,7 +93,7 @@ plot_final                      = True
 cmap                            = plt.cm.get_cmap("hsv", 12)
 
 dates                           = data_rnd_all['loctimestamp'].unique()
-#dates                           = dates[2001:2002]
+dates                           = dates[2000:2001]
 
 #
 #====================================================
@@ -376,6 +376,7 @@ for index, date in enumerate(dates):
         exp_r_4[i] = integrate.trapz((states ** 4) * p_list, states)
 
     # ---------------- conditional Phy. Exp. for next day ----------------
+    exp_r
     if plot:
         plt.subplot(212)
         for i in range(0, len(exp_r)):
@@ -383,7 +384,7 @@ for index, date in enumerate(dates):
 
         plt.legend(days_to_maturity_all)
         plt.xlabel('Maturities')
-        plt.ylabel('Expected Return in %')
+        plt.ylabel('Expected Cross-Return')
 
     # ---------------- conditional volatility ----------------
     var = exp_r_2 - np.power(exp_r, 2)
@@ -440,20 +441,25 @@ for index, date in enumerate(dates):
 #                            Expectations
 # =========================================================================
 #
+expectations_plot = expectations.copy()
+expectations_plot['exp_r']       = (expectations['exp_r'] * (365/ expectations['daystomaturity'].values)).apply(pd.to_numeric)
+expectations_plot['exp_vol']     = (expectations['exp_vol'] * (365/ expectations['daystomaturity'])).apply(pd.to_numeric)
+expectations_plot['exp_skew']    = (expectations['exp_skew'] * (365/ expectations['daystomaturity'])).apply(pd.to_numeric)
+expectations_plot['exp_kur']     = (expectations['exp_kur'] * (365/ expectations['daystomaturity'])).apply(pd.to_numeric)
 
 plt.figure('EXPECTED RETURNS')
 plt.suptitle('EXPECTED RETURNS')
 for i in range(0, len(days_to_maturity)):
-    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_r'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
+    plt.plot(expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['exp_r'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
 plt.legend(days_to_maturity_all)
 plt.xlabel('Date')
-plt.ylabel('Return in %')
+plt.ylabel('Cross-Return')
 
 plt.figure('EXPECTED VARIANCE')
 plt.suptitle('EXPECTED VARIANCE')
 for i in range(0, len(days_to_maturity)):
-    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_vol'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
+    plt.plot(expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['exp_vol'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
 plt.legend(days_to_maturity_all)
 plt.xlabel('Date')
@@ -462,7 +468,7 @@ plt.ylabel('Variance')
 plt.figure('EXPECTED SKEWNESS')
 plt.suptitle('EXPECTED SKEWNESS')
 for i in range(0, len(days_to_maturity)):
-    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_skew'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
+    plt.plot(expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['exp_skew'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
 plt.legend(days_to_maturity_all)
 plt.xlabel('Date')
@@ -471,7 +477,7 @@ plt.ylabel('Skewness')
 plt.figure('EXPECTED KURTOSIS')
 plt.suptitle('EXPECTED KURTOSIS')
 for i in range(0, len(days_to_maturity)):
-    plt.plot(expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations.loc[expectations['daystomaturity'] == days_to_maturity[i]]['exp_kur'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
+    plt.plot(expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['loctimestamp'].dt.date, expectations_plot.loc[expectations_plot['daystomaturity'] == days_to_maturity[i]]['exp_kur'], 'ro', color=cmap(i), label='Days to maturity %s' % (days_to_maturity[i]))
 
 plt.legend(days_to_maturity_all)
 plt.xlabel('Date')
@@ -529,6 +535,7 @@ for day in days_to_maturity:
 # ---------------- Regression  ----------------
 
 ols         = pd.DataFrame(columns=['maturity','ß_ret_0','ß_ret_1','ß_var_0','ß_var_1','ß_ske_0','ß_ske_1','ß_kur_0','ß_kur_1'])
+ols_t         = pd.DataFrame(columns=['maturity','ß_ret_0','ß_ret_1','ß_var_0','ß_var_1','ß_ske_0','ß_ske_1','ß_kur_0','ß_kur_1'])
 
 for day in days_to_maturity_all:
 
@@ -556,7 +563,7 @@ for day in days_to_maturity_all:
 
     model_ret = sm.OLS(Y_ret, X_ret)
     results_ret = model_ret.fit()
-
+    print(results_ret.summary())
     # ---------------- Regression Volatility ----------------
     Y_var = values['P_variance'].values
     X_var = np.reshape(values['exp_vol'].values, (1,len(values))).T
@@ -566,7 +573,7 @@ for day in days_to_maturity_all:
 
     model_var = sm.OLS(Y_var, X_var)
     results_var = model_var.fit()
-
+    print(results_var.summary())
     # ---------------- Regression Skewness ----------------
     Y_ske = values['P_skewness'].values
     X_ske = np.reshape(values['exp_skew'].values, (1, len(values))).T
@@ -576,7 +583,7 @@ for day in days_to_maturity_all:
 
     model_ske = sm.OLS(Y_ske, X_ske)
     results_ske = model_ske.fit()
-
+    print(results_ske.summary())
     # ---------------- Regression Kurtosis ----------------
     Y_kur = values['P_kurtosis'].values
     X_kur = np.reshape(values['exp_kur'].values, (1,len(values))).T
@@ -586,14 +593,20 @@ for day in days_to_maturity_all:
 
     model_kur = sm.OLS(Y_kur, X_kur)
     results_kur = model_kur.fit()
-
+    print(results_kur.summary())
     ols.loc[len(ols)] = [day, results_ret.params[0], results_ret.params[1],
                               results_var.params[0], results_var.params[1],
                               results_ske.params[0], results_ske.params[1],
                               results_kur.params[0], results_kur.params[1]]
 
+    ols_t.loc[len(ols)] = [day, results_ret.tvalues[0], results_ret.tvalues[1],
+                              results_var.tvalues[0], results_var.tvalues[1],
+                              results_ske.tvalues[0], results_ske.tvalues[1],
+                              results_kur.tvalues[0], results_kur.tvalues[1]]
+
     print("Regression - Modell: ")
     print(ols)
+    print(ols_t)
 
     del values
 
